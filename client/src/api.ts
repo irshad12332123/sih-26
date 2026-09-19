@@ -2,14 +2,22 @@ const API = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 
 export type SessionUser = {
   id: string;
+  officerId?: string;
+  employeeReference?: string;
   email: string;
   displayName: string;
+  designation?: string;
   role: string;
   department?: string;
+  organization?: string;
   district?: string;
   state?: string;
+  tehsil?: string;
+  village?: string;
+  jurisdictionType?: string;
   officerCode?: string;
 };
+
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem("nlams_token");

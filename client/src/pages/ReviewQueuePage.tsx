@@ -61,7 +61,7 @@ export function ReviewQueuePage() {
       });
 
       setMessage(
-        `Review Approved! Case ${selectedTask.case?.caseId} advanced to Section 3G Compensation Determination.`,
+        `Review Approved! Case ${selectedTask.case?.caseId} advanced to Land Valuation & Compensation Assessment.`,
       );
       await fetchReviews();
     } catch (err) {

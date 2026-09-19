@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   CheckCircle2,
   Database,
@@ -45,24 +46,25 @@ export function IntegrationsPage() {
       setSyncProgress(["Connecting to BhoomiRashi mock adapter…"]);
 
       await new Promise((r) => setTimeout(r, 400));
-      setSyncProgress((p) => [...p, "✓ Projects fetched (42 national highway projects)"]);
+      setSyncProgress((p) => [...p, "✓ External Project fetched: BR-NH-2026-0042 (NH-44 Ambala Greenfield Corridor Package)"]);
 
       await new Promise((r) => setTimeout(r, 400));
-      setSyncProgress((p) => [...p, "✓ Statutory project stages & land requirements reconciled"]);
+      setSyncProgress((p) => [...p, "✓ 6 Cadastral Parcel references & spatial geometries reconciled (Demo Kalan / Demo Khurd)"]);
 
       await new Promise((r) => setTimeout(r, 400));
-      setSyncProgress((p) => [...p, "✓ 1,284 cadastral parcel references indexed"]);
+      setSyncProgress((p) => [...p, "✓ External compensation, R&R entitlements, and site possession records synchronized"]);
 
       const res = await api<any>("/integrations/bhoomirashi/sync", { method: "POST" });
 
       setSyncSummary({
-        projectsSynced: res.projectsSynced || 42,
-        parcelReferences: res.parcelReferences || 1284,
-        statusUpdates: res.statusUpdates || 312,
+        projectCode: res.project?.projectId || "NLAMS-EXT-00042",
+        externalId: res.project?.externalProjectId || "BR-NH-2026-0042",
+        parcelsCount: res.parcelReferences || 6,
+        statusUpdates: res.statusUpdates || 6,
         errors: 0,
       });
 
-      setMessage("BhoomiRashi synchronization completed successfully.");
+      setMessage("BhoomiRashi synchronization completed successfully. External project is now visible in N-LAMS unified view.");
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed");
@@ -81,6 +83,8 @@ export function IntegrationsPage() {
     }
   };
 
+  const isBhoomiRashiSynced = mappings.some((m) => m.externalSystem === "BHOOMIRASHI");
+
   return (
     <>
       <PageHeader
@@ -97,13 +101,23 @@ export function IntegrationsPage() {
           <div className="eyebrow">NATIONAL ADAPTER & MONITORING LAYER</div>
           <h2>BhoomiRashi & Authoritative Integrations</h2>
           <p>
-            N-LAMS is an orchestration and monitoring layer. Authoritative systems (BhoomiRashi, State Land Records, PFMS) remain the source of record. All integrations are clearly labelled as <strong>MOCK / DEMO ADAPTERS</strong> for prototype demonstration.
+            N-LAMS is an orchestration and monitoring layer. Authoritative systems (BhoomiRashi, State Land Records, PFMS) remain the source of record. N-LAMS consumes the information required to provide a unified national view without importing external users or recreating external internal workflows.
           </p>
         </div>
       </div>
 
       {message && <div className="login-note" style={{ background: "#ecfdf5", borderColor: "#a7f3d0", color: "#065f46" }}>{message}</div>}
       {error && <div className="login-note" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>{error}</div>}
+
+      {/* Before / After Synchronization Indicator */}
+      <div className="trust-banner" style={{ marginBottom: "20px" }}>
+        <strong>DEMONSTRATION PRINCIPLE:</strong>
+        <span>
+          {isBhoomiRashiSynced
+            ? "✓ POST-SYNCHRONIZATION STATE: N-LAMS has received the external BhoomiRashi project (BR-NH-2026-0042) and integrated its operational metadata."
+            : "● PRE-SYNCHRONIZATION STATE: N-LAMS has no external BhoomiRashi project. Click 'SYNCHRONIZE WITH EXTERNAL SYSTEM' below to fetch external project metadata."}
+        </span>
+      </div>
 
       {/* BhoomiRashi Hero Sync Panel */}
       <div className="panel" style={{ padding: "20px", marginBottom: "24px" }}>
@@ -118,22 +132,23 @@ export function IntegrationsPage() {
               </span>
             </div>
             <p style={{ fontSize: "12px", color: "#64748b", margin: "4px 0" }}>
-              Synchronizes national highway corridor projects, statutory stage gazette notices (3A, 3D), and affected parcel references.
+              Synchronizes national highway corridor project metadata, statutory stage progress, and affected cadastral parcel references.
             </p>
           </div>
           <button
             className="button button-primary"
             onClick={handleBhoomiRashiSync}
             disabled={syncing}
+            style={{ fontWeight: 700 }}
           >
             <RefreshCw size={15} className={syncing ? "spin-icon" : ""} />
-            {syncing ? "Synchronizing BhoomiRashi…" : "SYNC PROJECTS"}
+            {syncing ? "Synchronizing BhoomiRashi…" : "SYNCHRONIZE WITH EXTERNAL SYSTEM"}
           </button>
         </div>
 
         {/* Sync Progress / Summary */}
         {syncProgress.length > 0 && (
-          <div style={{ background: "#f8fafc", padding: "12px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "12px" }}>
+          <div style={{ background: "#f8fafc", padding: "14px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "12px" }}>
             <div style={{ fontSize: "11px", fontWeight: 700, color: "#475569", marginBottom: "6px" }}>
               SYNCHRONIZATION LOG:
             </div>
@@ -155,20 +170,20 @@ export function IntegrationsPage() {
                 }}
               >
                 <div>
-                  <span style={{ fontSize: "10px", color: "#64748b" }}>PROJECTS SYNCED</span>
-                  <strong style={{ display: "block", fontSize: "16px", color: "#1e293b" }}>{syncSummary.projectsSynced}</strong>
+                  <span style={{ fontSize: "10px", color: "#64748b" }}>N-LAMS RECORD</span>
+                  <strong style={{ display: "block", fontSize: "14px", color: "#1e293b" }}>{syncSummary.projectCode}</strong>
                 </div>
                 <div>
-                  <span style={{ fontSize: "10px", color: "#64748b" }}>PARCEL REFERENCES</span>
-                  <strong style={{ display: "block", fontSize: "16px", color: "#2563eb" }}>{syncSummary.parcelReferences}</strong>
+                  <span style={{ fontSize: "10px", color: "#64748b" }}>EXTERNAL ID</span>
+                  <strong style={{ display: "block", fontSize: "14px", color: "#2563eb" }}>{syncSummary.externalId}</strong>
                 </div>
                 <div>
-                  <span style={{ fontSize: "10px", color: "#64748b" }}>STATUS UPDATES</span>
-                  <strong style={{ display: "block", fontSize: "16px", color: "#16a34a" }}>{syncSummary.statusUpdates}</strong>
+                  <span style={{ fontSize: "10px", color: "#64748b" }}>PARCELS SYNCED</span>
+                  <strong style={{ display: "block", fontSize: "14px", color: "#16a34a" }}>{syncSummary.parcelsCount}</strong>
                 </div>
                 <div>
-                  <span style={{ fontSize: "10px", color: "#64748b" }}>ERRORS</span>
-                  <strong style={{ display: "block", fontSize: "16px", color: "#059669" }}>{syncSummary.errors}</strong>
+                  <span style={{ fontSize: "10px", color: "#64748b" }}>INTEGRATION HEALTH</span>
+                  <strong style={{ display: "block", fontSize: "14px", color: "#059669" }}>100% HEALTHY</strong>
                 </div>
               </div>
             )}
@@ -217,23 +232,31 @@ export function IntegrationsPage() {
               <tr>
                 <th>External System</th>
                 <th>External Reference ID</th>
-                <th>Local N-LAMS Entity ID</th>
+                <th>N-LAMS Unified Entity ID</th>
                 <th>Entity Type</th>
                 <th>Reconciliation Status</th>
                 <th>Last Synced</th>
               </tr>
             </thead>
             <tbody>
-              {mappings.map((m) => (
-                <tr key={m.id}>
-                  <td><strong>{m.externalSystem}</strong></td>
-                  <td><span className="mono" style={{ color: "#2563eb", fontWeight: 600 }}>{m.externalId}</span></td>
-                  <td><span className="mono">{m.localId}</span></td>
-                  <td><span style={{ fontSize: "11px", background: "#f1f5f9", padding: "2px 6px", borderRadius: "4px" }}>{m.entityType}</span></td>
-                  <td><span style={{ color: "#16a34a", fontSize: "11px", fontWeight: 700 }}>✓ {m.syncStatus}</span></td>
-                  <td><small>{new Date(m.lastSyncedAt).toLocaleString()}</small></td>
+              {mappings.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "20px", color: "#64748b" }}>
+                    No external records synchronized yet. Click "SYNCHRONIZE WITH EXTERNAL SYSTEM" above to onboard BhoomiRashi projects.
+                  </td>
                 </tr>
-              ))}
+              ) : (
+                mappings.map((m) => (
+                  <tr key={m.id}>
+                    <td><strong>{m.externalSystem}</strong></td>
+                    <td><span className="mono" style={{ color: "#2563eb", fontWeight: 600 }}>{m.externalId}</span></td>
+                    <td><span className="mono">{m.localId}</span></td>
+                    <td><span style={{ fontSize: "11px", background: "#f1f5f9", padding: "2px 6px", borderRadius: "4px" }}>{m.entityType}</span></td>
+                    <td><span style={{ color: "#16a34a", fontSize: "11px", fontWeight: 700 }}>✓ {m.syncStatus}</span></td>
+                    <td><small>{new Date(m.lastSyncedAt).toLocaleString()}</small></td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
