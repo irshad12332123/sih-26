@@ -1,68 +1,108 @@
 # N-LAMS — National Land Acquisition & Management System
 
-N-LAMS is a functional, persistent MVP for a national land-acquisition coordination and monitoring layer. Existing departmental and state systems remain systems of record; N-LAMS provides the unified view for projects, simulated/demo parcels, cases, statutory workflow stages, documents, compensation, possession, R&R, notifications, dashboards, reports, and auditability.
+N-LAMS is a national land-acquisition coordination, GIS corridor discovery, and monitoring orchestration platform developed as an SIH prototype. Existing departmental and state systems (such as BhoomiRashi, State Land Records, and PFMS) remain authoritative systems of record; N-LAMS provides the unified orchestration layer connecting projects, candidate cadastral parcels, cases, statutory workflow stages, geo-tagged field verification, reviewer scrutiny, compensation awards, possession, R&R, notifications, dashboards, reports, and citizen tracking.
 
-Local development uses a persistent `.data/nlams.json` repository; the production path is the Supabase/PostGIS schema. Demo geometry and external responses are synthetic and clearly labelled.
+Local development and demonstration run entirely on a persistent `.data/nlams.json` repository; the production path is the Supabase/PostgreSQL/PostGIS schema in `supabase/migrations/`.
 
-## Repository structure
+---
+
+## 🏛️ System Architecture
 
 ```text
-sih-26/
-├── server/        # Express API, adapters, storage, middleware, seed
-├── client/        # React/Vite application
-├── supabase/      # PostgreSQL/PostGIS/RLS migrations
-├── ARCHITECTURE.md
-└── openapi.yaml
+BhoomiRashi / State Land Records / PFMS / Other Systems (MOCK ADAPTERS)
+                         ↓
+                    Adapters
+                         ↓
+                 Canonical N-LAMS
+                         ↓
+       ┌─────────────────┼─────────────────┐
+       ↓                 ↓                 ↓
+      GIS              Workflow         Monitoring
+       ↓                 ↓                 ↓
+    Parcels            Tasks          Dashboard
+       ↓                 ↓                 ↓
+    Cases            Officers        Analytics
+       ↓                 ↓                 ↓
+                  Documents / Audit
+                         ↓
+                Notifications / Citizen Portal
 ```
 
-## Run locally
+---
 
-Prerequisites: Node.js 20+, npm, and optionally a Supabase project. The default `STORAGE_DRIVER=local` keeps the UI and API runnable without AWS or Supabase credentials.
+## 🚀 Quick Start & Running Locally
+
+Prerequisites: **Node.js 20+** and **npm**.
 
 ```bash
+# Install dependencies
 npm install
-cp .env.example .env
+
+# Initialize / Seed the golden demo baseline
 npm run seed
+
+# Run automated end-to-end golden flow tests
+npm test
+
+# Start the full development stack (Frontend on http://localhost:5173, Backend on http://localhost:4000)
 npm run dev
 ```
 
-The web portal runs on `http://localhost:5173`; the API runs on `http://localhost:4000`. Open `/login` for the demo sign-in. Demo data is explicitly labelled and contains no real citizen information. `npm run seed` is repeatable for the local fixture.
+---
 
-Demo accounts: `project@nlams.demo / Project@123`, `district@nlams.demo / District@123`, `national@nlams.demo / National@123`, `superadmin@nlams.demo / Admin@123`, `department@nlams.demo / Department@123`, `field@nlams.demo / Field@123`, `reviewer@nlams.demo / Reviewer@123`, and `viewer@nlams.demo / Viewer@123`. These credentials are for the demo environment only.
+## 👥 Demo User Personas & Credentials
 
-Frontend code is under `client/src`. `client/src/App.tsx` is intentionally only the route orchestrator; layouts, pages, and reusable components are exported from their respective files.
+| Role | Name | Email | Password | Primary Demo Scope |
+| :--- | :--- | :--- | :--- | :--- |
+| **National Admin** | MoRTH National Administrator | `national@nlams.demo` | `National@123` | National dashboard, BhoomiRashi sync, 3D Declaration |
+| **Project Officer** | PIU Ambala Corridor Officer | `project@nlams.demo` | `Project@123` | Project alignment, 100m corridor parcel discovery |
+| **Field Officer** | FO-AMB-01 (Ambala) | `field@nlams.demo` | `Field@123` | "My Field Tasks", physical boundary inspection, photo upload & DEMO GPS |
+| **Reviewing Officer** | REV-AMB-01 (Ambala) | `reviewer@nlams.demo` | `Reviewer@123` | "Review Queue", photo evidence scrutiny, Approve / Reject / Correction |
+| **District Officer** | CALA Ambala | `district@nlams.demo` | `District@123` | Section 3C objections, 3E possession taking, R&R completion |
+| **Department Admin**| NHAI Land Acquisition Cell | `department@nlams.demo` | `Department@123` | Section 3G compensation award determination & approval |
+| **Viewer** | Public / Ministry Viewer | `viewer@nlams.demo` | `Viewer@123` | Read-only access across national dashboards and reports |
 
-## Supabase setup
+---
 
-1. Create a Supabase project and enable email/password authentication.
-2. Run `supabase/migrations/001_initial_schema.sql` followed by `supabase/migrations/002_reconciliation.sql`. `001_n_lams.sql` is a historical competing draft and must not be applied alongside the canonical pair.
-3. Configure `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and the frontend `VITE_` values only in environment secrets. Never expose a service-role key or AWS secret to Vite.
-4. Seed departments, states, districts, roles, workflow templates, and demo records through a controlled idempotent seed job.
+## 🌟 End-to-End Golden Demonstration Flow
 
-The migration enables PostGIS, keeps source parcel geometry immutable, models partial acquisition in `project_parcels.affected_geometry`, and includes RLS policies for project, case, document, and audit access.
+1. **Sign in as National Admin (`national@nlams.demo`)**
+   - Open **Integrations** -> Click **[ SYNC PROJECTS ]** on BhoomiRashi.
+   - Inspect synchronized project `NH-44 Corridor Expansion — Demo Section` (42 projects, 1,284 parcels, 248.6 ha required).
+2. **Switch to Project Officer (`project@nlams.demo`)**
+   - Open **Projects** -> Select `NH-44 Corridor Expansion — Demo Section`.
+   - Inspect alignment corridor map -> Set buffer corridor (e.g. 100m).
+   - Click **[ DISCOVER AFFECTED PARCELS ]** -> Automatically imports candidate parcels, creates acquisition cases, and triggers workflow stages.
+3. **Switch to Field Officer (`field@nlams.demo`)**
+   - Open **My Field Tasks** -> Select `PCL-00128` (Survey 142/3, Demo Village).
+   - Fill in boundary checklist -> Click **DEMO GPS** -> Upload site photograph -> Click **[ SUBMIT VERIFICATION ]**.
+   - Observe live topbar notification and activity timeline update.
+4. **Switch to Reviewing Officer (`reviewer@nlams.demo`)**
+   - Open **Review Queue** -> Inspect submitted photographic evidence, GPS coordinates, checklist, and parcel map.
+   - Click **[ APPROVE & ADVANCE STAGE ]** -> Workflow advances to Section 3G Compensation.
+5. **Open Compensation (`/compensation`)**
+   - Review assessed compensation of ₹11,25,000 for `PCL-00128` -> Click **[ Approve Award ]**.
+   - Click **[ PFMS DEMO sync ]** -> Directly reconciles with PFMS mock DBT adapter, marking status as `PAID` with reference `DEMO-PFMS-2026-0042`.
+6. **Open R&R (`/rr`)**
+   - View affected and eligible families -> Click **[ Deliver & Complete ]** -> R&R marked complete.
+7. **Open National Overview (`/`)**
+   - Observe real-time metric updates for land acquired, compensation disbursed, and possession taken.
+8. **Open Citizen Status Portal (`/citizen`)**
+   - Search `CITIZEN-12345` or `PCL-00128` -> Transparent, privacy-preserving tracking of acquisition stage and payment confirmation.
 
-## Storage
+---
 
-The API exposes a presigned-upload contract through `POST /api/documents/presigned-upload`. `LocalStorage` is the default development implementation. Add an AWS S3 implementation behind the same `ObjectStorage` interface using `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_S3_BUCKET`; the browser still only receives short-lived URLs.
+## 🗄️ Database & PostGIS Migrations
 
-## API
+Canonical migration sequence in `supabase/migrations/`:
+1. `001_initial_schema.sql`: Core schema (PostGIS, projects, parcels, project_parcels, acquisition_cases, workflow, documents, RLS).
+2. `002_reconciliation.sql`: System sync logs, statutory acts & legal mappings, reports.
+3. `003_operational_demo_data.sql`: Idempotent seed data for Ambala corridor, workflow instances, tasks, external system mappings, and `case_activity` timeline.
 
-The API uses a consistent `{ data, meta }` or `{ error }` response shape and validates create/presign payloads with Zod. Key endpoints include:
+---
 
-- `GET /api/dashboard/summary`
-- `GET|POST /api/projects`, `GET /api/projects/:id`
-- `GET /api/cases`, `GET /api/cases/:id`
-- `POST /api/cases/:id/workflow/start`
-- `POST /api/tasks/:id/complete` and `/reject`
-- `POST /api/documents/presigned-upload`
-- `GET /api/integrations/:system/status`
+## ⚖️ Legal & Mock Disclaimer
 
-All external adapters are isolated under `server/src/integrations` and are clearly marked DEMO / MOCK. Dashboard, project, case, GIS, report, audit, and login screens use the backend API; local mutations persist, advance configured workflow stages, create notifications, and append audit events.
-
-Legal disclaimer: This N-LAMS demonstration uses configurable workflow templates. The National Highways Act, 1956 workflow shown is a software demonstration based on relevant statutory sections and must not be treated as legal advice or as a substitute for applicable government procedures, rules, notifications, or current amendments.
-
-## Architecture and deployment
-
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for system, database, RLS, GIS, document, S3, workflow, integration, and Mermaid data-flow diagrams. For deployment, build the Vite app as a static artifact, deploy the Express API behind TLS and a reverse proxy, keep Supabase/S3 credentials in a secret manager, and set `CLIENT_URL` to the deployed web origin.
-
-The initial REST contract is documented in `openapi.yaml`.
+- **BhoomiRashi, State Land Records & PFMS**: Integrations are executable **MOCK / DEMO ADAPTERS**. Authoritative government systems retain sole legal authority.
+- **Cadastral Geometry**: Parcel polygons and alignment LineStrings are **SYNTHETIC DEMO GIS DATA** in Ambala district (Haryana) created for demonstration purposes without real citizen personal information.
+- **Workflow Representation**: Based on the National Highways Act, 1956 configurable statutory templates for software demonstration purposes only.
