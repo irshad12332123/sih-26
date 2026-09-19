@@ -11,29 +11,12 @@ import {
   Home,
   MapPin,
   ShieldAlert,
+  UploadCloud,
   User,
 } from "lucide-react";
 import { api, currentUser } from "../api";
 import { PageHeader, ProgressBar, StatusBadge } from "../components/common";
-
-type Case = {
-  id: string;
-  caseId: string;
-  projectName: string;
-  parcelId: string;
-  externalParcelId?: string;
-  surveyNumber?: string;
-  village: string;
-  state: string;
-  district: string;
-  stage: string;
-  currentStage: string;
-  progress: number;
-  risk: string;
-  priority?: string;
-  status: string;
-  officer: string;
-};
+import type { Case, DocumentRecord } from "../types";
 
 type Detail = Case & {
   tasks: any[];
@@ -43,32 +26,44 @@ type Detail = Case & {
   compensation: any;
   possession: any;
   rr: any;
+  documents: DocumentRecord[];
   assignedOfficer: any;
 };
 
 const stageDocRequirements: Record<string, string[]> = {
-  "3A Preliminary Notification": ["Section 3A Gazette Publication"],
-  "3C Objection Hearing": ["Objection Application (Form 3C)", "Hearing Minutes & Order"],
-  "Field Verification": ["Field Verification Report", "Geo-tagged Site Photographs"],
-  "Review & Approval": ["Competent Review Note"],
-  "3D Declaration of Acquisition": ["Section 3D Declaration Gazette"],
-  "3G Compensation Determination": ["Compensation Assessment Award"],
-  "3H Deposit and Payment": ["PFMS Payment Advice", "Direct Benefit Transfer Receipt"],
-  "3E Taking Possession": ["Possession Certificate (Form 3E)"],
-  "R&R Completion": ["R&R Entitlement & Delivery Report"],
+  "Project Submission": ["Project Feasibility Alignment Map", "Baseline Cadastral Schedule"],
+  "Administrative Review & Preliminary Notification": ["Preliminary Statutory Notification", "Administrative Sanction Order"],
+  "Administrative Review": ["Preliminary Statutory Notification", "Administrative Sanction Order"],
+  "Field Inspection": ["Field Inspection Report", "Geo-tagged Site Photographs"],
+  "Field Verification": ["Field Inspection Report", "Geo-tagged Site Photographs"],
+  "Evidence Scrutiny & Approval": ["Competent Authority Scrutiny & Verification Note"],
+  "Field Verification Scrutiny & Approval": ["Competent Authority Scrutiny & Verification Note"],
+  "Compensation Assessment": ["Compensation Assessment Schedule", "Market Valuation Matrix"],
+  "Land Valuation & Compensation Assessment": ["Compensation Assessment Schedule", "Market Valuation Matrix"],
+  "Compensation Award Approval": ["Statutory Compensation Award Declaration", "Competent Approval Order"],
+  "Statutory Compensation Award Approval": ["Statutory Compensation Award Declaration", "Competent Approval Order"],
+  "Disbursement & PFMS Payment": ["PFMS Direct Benefit Transfer Advice", "Disbursement Summary Receipt"],
+  "Disbursement & DBT Payment": ["PFMS Direct Benefit Transfer Advice", "Disbursement Summary Receipt"],
+  "R&R Assessment & Social Entitlement": ["Affected Families Enumeration Schedule", "Resettlement Action Plan"],
+  "R&R Entitlements Assessment": ["Affected Families Enumeration Schedule", "Resettlement Action Plan"],
+  "R&R Package Approval & Delivery": ["R&R Entitlement Delivery Sanction Order"],
+  "Site Possession & Handover": ["Site Possession Certificate", "Panchnama of Physical Handover"],
+  "Taking Site Possession (Form 3E)": ["Site Possession Certificate", "Panchnama of Physical Handover"],
+  "Project Completion & Cadastral Handover": ["Corridor Handover Certificate", "Cadastral Record Update Order"],
+  "Project Completion & Cadastral Closure": ["Corridor Handover Certificate", "Cadastral Record Update Order"],
 };
 
 export function CasesPage() {
   const [items, setItems] = useState<Case[]>([]);
   const [q, setQ] = useState("");
-  const refresh = () => api<Case[]>("/cases").then(setItems);
+  const refresh = () => api<Case[]>("/cases").then(setItems).catch((err) => console.warn("Failed to load cases:", err));
 
   useEffect(() => {
     refresh();
   }, []);
 
   const filtered = items.filter((c) =>
-    `${c.caseId} ${c.projectName} ${c.parcelId} ${c.village} ${c.surveyNumber || ""}`
+    `${c.caseId} ${c.projectName || ""} ${c.parcelId} ${c.village} ${c.surveyNumber || ""}`
       .toLowerCase()
       .includes(q.toLowerCase()),
   );
@@ -107,34 +102,53 @@ export function CasesPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((c) => (
-                <tr key={c.id}>
-                  <td>
-                    <Link className="table-title mono" to={`/cases/${c.id}`}>
-                      {c.caseId}
-                      <span className="table-sub">
-                        {c.parcelId} {c.surveyNumber ? `· Survey ${c.surveyNumber}` : ""}
-                      </span>
-                    </Link>
-                  </td>
-                  <td>{c.projectName}</td>
-                  <td>{c.village}, {c.district}</td>
-                  <td><strong style={{ fontSize: "12px", color: "#2563eb" }}>{c.stage || c.currentStage}</strong></td>
-                  <td>
-                    <div className="table-progress">
-                      <span>{c.progress}%</span>
-                      <ProgressBar value={c.progress} />
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: "center", padding: "40px 20px" }}>
+                    <div style={{ maxWidth: "440px", margin: "0 auto" }}>
+                      <div style={{ fontSize: "28px", marginBottom: "8px" }}>📋</div>
+                      <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#1e293b", margin: "0 0 6px" }}>
+                        No Acquisition Cases Found
+                      </h3>
+                      <p style={{ fontSize: "12px", color: "#64748b", margin: "0 0 16px", lineHeight: "1.5" }}>
+                        Cases are created automatically when an external project is synchronized (Side A) or when a native project is submitted (Side B).
+                      </p>
+                      <Link to="/projects" className="button button-primary button-sm">
+                        View Projects Portfolio
+                      </Link>
                     </div>
                   </td>
-                  <td>
-                    <span className={`risk-text ${(c.risk || "LOW").toLowerCase()}`}>
-                      <i />{c.risk || "Low"}
-                    </span>
-                  </td>
-                  <td><small>{c.officer}</small></td>
-                  <td><StatusBadge status={c.status} /></td>
                 </tr>
-              ))}
+              ) : (
+                filtered.map((c) => (
+                  <tr key={c.id}>
+                    <td>
+                      <Link className="table-title mono" to={`/cases/${c.id}`}>
+                        {c.caseId}
+                        <span className="table-sub">
+                          {c.parcelId} {c.surveyNumber ? `· Survey ${c.surveyNumber}` : ""}
+                        </span>
+                      </Link>
+                    </td>
+                    <td>{c.projectName}</td>
+                    <td>{c.village}, {c.district}</td>
+                    <td><strong style={{ fontSize: "12px", color: "#2563eb" }}>{c.currentStage || c.stage}</strong></td>
+                    <td>
+                      <div className="table-progress">
+                        <span>{c.progress}%</span>
+                        <ProgressBar value={c.progress} />
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`risk-text ${(c.risk || "LOW").toLowerCase()}`}>
+                        <i />{c.risk || "Low"}
+                      </span>
+                    </td>
+                    <td><small>{c.officer || "Assigned by jurisdiction"}</small></td>
+                    <td><StatusBadge status={c.status} /></td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -149,8 +163,11 @@ export function CaseDetailsPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [docTitle, setDocTitle] = useState("");
+  const [docFileName, setDocFileName] = useState("");
 
-  const refresh = () => api<Detail>(`/cases/${id}`).then(setItem);
+  const refresh = () => api<Detail>(`/cases/${id}`).then(setItem).catch((err) => console.warn("Failed to load case detail:", err));
   useEffect(() => {
     refresh();
   }, [id]);
@@ -158,22 +175,61 @@ export function CaseDetailsPage() {
   if (!item) return <div className="empty-state">Loading acquisition case…</div>;
 
   const active = item.tasks.find((t) => ["PENDING", "IN_PROGRESS", "OVERDUE"].includes(t.status));
-  const docs = stageDocRequirements[item.currentStage] || ["Standard Acquisition Supporting Dossier"];
+  const docsReq = stageDocRequirements[item.currentStage] || ["Standard Acquisition Supporting Dossier"];
+  const attachedDocs = item.documents || [];
 
   const handleCompleteActiveTask = async () => {
-    if (!active) return;
     try {
       setBusy(true);
       setError("");
       setMessage("");
-      await api(`/tasks/${active.id}/complete`, {
-        method: "POST",
-        body: JSON.stringify({ remarks: "Completed from case management portal." }),
-      });
-      setMessage("Task completed and workflow advanced.");
+      let res: any;
+      if (active) {
+        res = await api(`/tasks/${active.id}/complete`, {
+          method: "POST",
+          body: JSON.stringify({ remarks: `Approved and completed from case management portal.` }),
+        });
+      } else {
+        res = await api(`/cases/${item.id}/advance`, {
+          method: "POST",
+          body: JSON.stringify({ remarks: `Stage advanced from case management portal.` }),
+        });
+      }
+      setMessage(res?.message || "Stage completed and workflow routed to next stage successfully.");
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Task completion failed");
+      setError(err instanceof Error ? err.message : "Stage completion failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAttachDocument = async () => {
+    if (!docTitle || !docFileName) return;
+    try {
+      setBusy(true);
+      await api("/documents", {
+        method: "POST",
+        body: JSON.stringify({
+          caseId: item.id,
+          parcelId: item.parcel?.parcelId,
+          projectId: item.projectId,
+          workflowStage: item.currentStage,
+          documentType: "OTHER",
+          title: docTitle,
+          fileName: docFileName,
+          mandatory: true,
+          approvalRequired: true,
+          remarks: "DEMO / SYNTHETIC DOCUMENT — Attached from Case Workspace",
+        }),
+      });
+      setShowUploadModal(false);
+      setDocTitle("");
+      setDocFileName("");
+      setMessage("Document attached successfully.");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setBusy(false);
     }
@@ -199,7 +255,7 @@ export function CaseDetailsPage() {
         </div>
         <div className="detail-actions">
           <StatusBadge status={item.status} />
-          {active && (
+          {item.status !== "Completed" && (
             <button className="button button-primary" onClick={handleCompleteActiveTask} disabled={busy}>
               <CheckCircle2 size={16} /> Complete Current Stage
             </button>
@@ -229,7 +285,7 @@ export function CaseDetailsPage() {
           </span>
           <span>
             Responsible Officer
-            <strong>{item.assignedOfficer?.displayName || "Assigned by jurisdiction"}</strong>
+            <strong>{item.assignedOfficer?.displayName || item.officer || "Assigned by jurisdiction"}</strong>
           </span>
         </div>
       </div>
@@ -241,8 +297,8 @@ export function CaseDetailsPage() {
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <h2>Configured Highway Workflow</h2>
-                <p>National Highways Act, 1956 · High-integrity stage progression</p>
+                <h2>Statutory Workflow Progress</h2>
+                <p>Jurisdiction-aware stage progression & officer assignments</p>
               </div>
             </div>
             <div className="case-list">
@@ -255,8 +311,13 @@ export function CaseDetailsPage() {
                     <div>
                       <strong>{t.stage?.name || "Workflow Stage"}</strong>
                       <span>
-                        Legal basis: {t.stage?.legalSection ? `Section ${t.stage.legalSection}` : "Statutory policy"} · Due {new Date(t.dueAt).toLocaleDateString()}
+                        Legal basis: {t.stage?.legalSection ? t.stage.legalSection : "Statutory policy"} · Due {new Date(t.dueAt).toLocaleDateString()}
                       </span>
+                      {t.assignedUser && (
+                        <small style={{ color: "#2563eb", display: "block" }}>
+                          Officer: {t.assignedUser.displayName} ({t.assignedUser.designation})
+                        </small>
+                      )}
                       {t.remarks && <small style={{ color: "#64748b", display: "block" }}>{t.remarks}</small>}
                     </div>
                   </div>
@@ -270,8 +331,8 @@ export function CaseDetailsPage() {
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <h2>Case Activity & Audit Timeline ({item.activity?.length || 0})</h2>
-                <p>Immutable event log tracking all transitions and approvals</p>
+                <h2>Chronological Case Activity Timeline ({item.activity?.length || 0})</h2>
+                <p>Immutable event trail tracking all transitions, reviews, and documents</p>
               </div>
             </div>
             <div style={{ padding: "14px 18px" }}>
@@ -286,7 +347,6 @@ export function CaseDetailsPage() {
                         alignItems: "flex-start",
                         borderLeft: "2px solid #2563eb",
                         paddingLeft: "12px",
-                        position: "relative",
                       }}
                     >
                       <div style={{ flex: 1 }}>
@@ -336,26 +396,48 @@ export function CaseDetailsPage() {
               </div>
               <div>
                 <span>Source System</span>
-                <strong>{item.parcel?.sourceSystem || "BhoomiRashi MOCK"}</strong>
+                <strong>{item.parcel?.sourceSystem || "N-LAMS"}</strong>
               </div>
             </div>
           </section>
 
-          {/* Document Checklist for Current Stage */}
+          {/* Stage Document Checklist */}
           <section className="panel">
             <div className="panel-heading">
               <div>
                 <h2>Stage Document Checklist</h2>
                 <p>Required statutory compliance documents</p>
               </div>
+              <button className="button button-secondary button-sm" onClick={() => setShowUploadModal(true)}>
+                <UploadCloud size={13} /> Attach Document
+              </button>
             </div>
             <div style={{ padding: "12px 18px" }}>
-              {docs.map((d, i) => (
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "6px" }}>
+                REQUIRED FOR CURRENT STAGE ({item.currentStage}):
+              </div>
+              {docsReq.map((d, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#334155", padding: "6px 0", borderBottom: "1px solid #f1f5f9" }}>
                   <CheckCircle2 size={15} color="#16a34a" />
                   <span>{d}</span>
                 </div>
               ))}
+
+              {attachedDocs.length > 0 && (
+                <div style={{ marginTop: "12px" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "6px" }}>
+                    ATTACHED & VALIDATED DOCUMENTS:
+                  </div>
+                  {attachedDocs.map((doc) => (
+                    <div key={doc.id} style={{ background: "#f8fafc", padding: "8px", borderRadius: "6px", border: "1px solid #e2e8f0", marginBottom: "6px" }}>
+                      <strong style={{ display: "block", fontSize: "12px", color: "#1e293b" }}>{doc.title}</strong>
+                      <span style={{ fontSize: "10px", color: "#64748b" }}>
+                        {doc.fileName} · {doc.fileSize} · Uploaded by {doc.uploadedByName}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </section>
 
@@ -414,6 +496,46 @@ export function CaseDetailsPage() {
           )}
         </div>
       </div>
+
+      {/* Upload Document Modal */}
+      {showUploadModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+          }}
+        >
+          <div className="panel" style={{ width: "480px", maxWidth: "90vw", padding: "20px" }}>
+            <h3 style={{ fontSize: "15px", fontWeight: 700, margin: "0 0 12px", color: "#1e293b" }}>
+              Attach Statutory Supporting Document
+            </h3>
+            <label className="input-label">
+              Document Title
+              <input value={docTitle} onChange={(e) => setDocTitle(e.target.value)} placeholder="e.g. Ground Survey Field Sheet" />
+            </label>
+            <label className="input-label" style={{ marginTop: "8px" }}>
+              File Name
+              <input value={docFileName} onChange={(e) => setDocFileName(e.target.value)} placeholder="e.g. DEMO-SURVEY-SHEET-145-2.pdf" />
+            </label>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
+              <button className="button button-secondary" onClick={() => setShowUploadModal(false)}>
+                Cancel
+              </button>
+              <button className="button button-primary" onClick={handleAttachDocument} disabled={busy || !docTitle || !docFileName}>
+                Attach & Validate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

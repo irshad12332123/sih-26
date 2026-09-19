@@ -10,7 +10,7 @@ export const notFound: RequestHandler = (_req: Request, res: Response) =>
   res
     .status(404)
     .json({ error: { code: "NOT_FOUND", message: "Resource not found." } });
-export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
+export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
   if (error instanceof ZodError)
     return res.status(400).json({
       error: {
@@ -23,9 +23,15 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
     JSON.stringify({
       level: "error",
       message: error instanceof Error ? error.message : "Unknown error",
+      stack: error instanceof Error ? error.stack : undefined,
+      path: req.originalUrl || req.url,
+      method: req.method,
     }),
   );
   return res.status(500).json({
-    error: { code: "INTERNAL_ERROR", message: "Unexpected server error." },
+    error: {
+      code: "INTERNAL_ERROR",
+      message: error instanceof Error ? error.message : "Unexpected server error.",
+    },
   });
 };

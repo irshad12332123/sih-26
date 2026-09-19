@@ -1,21 +1,22 @@
-import { loadState, saveState, dbPath, resetState } from "./repositories/local.repository.js";
+import { resetState } from "./repositories/local.repository.js";
 
 const state = resetState();
 console.log(
   JSON.stringify({
     level: "info",
-    message: `Idempotent local demo seed persisted to ${dbPath}. Golden case NLA-C-00231 (FO-AMB-01) initialized.`,
+    message: `Idempotent local demo seed initialized. Master authority baseline ready.`,
     records: {
       projects: state.projects.length,
       cases: state.cases.length,
       parcels: state.parcels.length,
       tasks: state.tasks.length,
-      activities: state.caseActivity.length,
-      compensations: state.compensations.length,
+      activities: state.caseActivities.length,
+      compensation: state.compensation.length,
       rr: state.rr.length,
-      possessions: state.possessions.length,
+      possession: state.possession.length,
       notifications: state.notifications.length,
-      auditLogs: state.audits.length,
+      auditLogs: state.audit.length,
+      officers: state.users.length,
     },
   }),
 );
