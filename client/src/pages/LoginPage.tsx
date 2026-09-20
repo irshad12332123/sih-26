@@ -1,5 +1,5 @@
 import { FormEvent, useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowRight,
@@ -14,7 +14,7 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
-import { login, getRoleDashboardPath } from "../api";
+import { login, getRoleDashboardPath, currentUser } from "../api";
 import "../login.css";
 
 interface DemoAccount {
@@ -166,6 +166,9 @@ const demoAccounts: DemoAccount[] = [
 
 export function LoginPage() {
   const navigate = useNavigate();
+  // A visitor who already has a session should land on their workspace rather
+  // than re-authenticating.
+  const [existingUser] = useState(() => currentUser());
   const [email, setEmail] = useState("national.admin@demo.nlams.gov");
   const [password, setPassword] = useState("Demo@123");
   const [showPassword, setShowPassword] = useState(false);
@@ -173,6 +176,7 @@ export function LoginPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState("");
 
   const filteredAccounts = useMemo(() => {
     return demoAccounts.filter((account) => {
@@ -191,12 +195,15 @@ export function LoginPage() {
 
   async function submit(event?: FormEvent) {
     if (event) event.preventDefault();
+    if (!email.trim() || !password) {
+      setError("Enter both your official email / officer ID and portal password.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const user = await login(email, password);
-      const targetDashboard = getRoleDashboardPath(user.role);
-      navigate(targetDashboard);
+      const user = await login(email.trim(), password);
+      navigate(getRoleDashboardPath(user.role), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in. Please verify credentials.");
     } finally {
@@ -205,19 +212,25 @@ export function LoginPage() {
   }
 
   async function quickLogin(account: DemoAccount) {
+    if (busy) return;
     setEmail(account.email);
     setPassword(account.pass);
     setBusy(true);
+    setPendingEmail(account.email);
     setError("");
     try {
       const user = await login(account.email, account.pass);
-      const targetDashboard = getRoleDashboardPath(user.role);
-      navigate(targetDashboard);
+      navigate(getRoleDashboardPath(user.role), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in");
     } finally {
       setBusy(false);
+      setPendingEmail("");
     }
+  }
+
+  if (existingUser) {
+    return <Navigate to={getRoleDashboardPath(existingUser.role)} replace />;
   }
 
   return (
@@ -256,7 +269,7 @@ export function LoginPage() {
             </div>
 
             {error && (
-              <div className="nlams-error-banner">
+              <div className="nlams-error-banner" role="alert">
                 <AlertTriangle size={18} style={{ flexShrink: 0 }} />
                 <span>{error}</span>
               </div>
@@ -354,7 +367,7 @@ export function LoginPage() {
                     className={`nlams-category-btn ${selectedCategory === cat ? "active" : ""}`}
                     onClick={() => setSelectedCategory(cat)}
                   >
-                    {cat === "All" ? "All Roles (12)" : cat}
+                    {cat === "All" ? `All Roles (${demoAccounts.length})` : cat}
                   </button>
                 ))}
               </div>
@@ -388,8 +401,18 @@ export function LoginPage() {
                 return (
                   <div
                     key={account.email}
+                    role="button"
+                    tabIndex={0}
+                    aria-disabled={busy}
                     className={`nlams-persona-card ${isSelected ? "selected" : ""}`}
                     onClick={() => quickLogin(account)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        quickLogin(account);
+                      }
+                    }}
+                    style={busy ? { opacity: 0.65, cursor: "progress" } : undefined}
                     title={`Click to sign in as ${account.roleName}`}
                   >
                     <div className="nlams-persona-info">
@@ -415,12 +438,13 @@ export function LoginPage() {
                       <button
                         type="button"
                         className="nlams-persona-btn"
+                        disabled={busy}
                         onClick={(e) => {
                           e.stopPropagation();
                           quickLogin(account);
                         }}
                       >
-                        <span>Sign in</span>
+                        <span>{pendingEmail === account.email ? "Signing in…" : "Sign in"}</span>
                         <ArrowRight size={12} />
                       </button>
                     </div>

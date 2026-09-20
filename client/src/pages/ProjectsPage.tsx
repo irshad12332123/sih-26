@@ -19,7 +19,16 @@ import {
 import { MapContainer, Polygon, Polyline, Popup, TileLayer } from "react-leaflet";
 import { api, csvDownload, currentUser } from "../api";
 import { MiniStat, PageHeader, ProgressBar, StatusBadge } from "../components/common";
-import type { Project, Parcel, DocumentRecord } from "../types";
+import { Alert, ErrorBlock, LoadingBlock, Modal, TableLoadingRow } from "../components/ui";
+import type { Project, Parcel } from "../types";
+
+/** Roles permitted by the API to create and submit native projects. */
+const PROJECT_AUTHOR_ROLES = [
+  "PROJECT_OFFICER",
+  "PROJECT_AUTHORITY",
+  "NATIONAL_ADMIN",
+  "SUPER_ADMIN",
+];
 
 export function ProjectsPage() {
   const [items, setItems] = useState<Project[]>([]);
@@ -49,17 +58,38 @@ export function ProjectsPage() {
   ]);
   const [submitImmediately, setSubmitImmediately] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [formError, setFormError] = useState("");
 
   const navigate = useNavigate();
   const user = currentUser();
+  const canCreate = PROJECT_AUTHOR_ROLES.includes(user?.role || "");
 
-  const refresh = () => {
-    api<Project[]>("/projects").then(setItems).catch((err) => console.warn("Failed to load projects:", err));
-    api<Parcel[]>("/master/parcels").then(setMasterParcels).catch((err) => console.warn("Failed to load master parcels:", err));
+  const refresh = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
+    try {
+      const [projectList, parcelPool] = await Promise.all([
+        api<Project[]>("/projects"),
+        api<Parcel[]>("/master/parcels").catch(() => [] as Parcel[]),
+      ]);
+      setItems(projectList || []);
+      setMasterParcels(parcelPool || []);
+      setLoadError("");
+    } catch (err) {
+      setLoadError(
+        err instanceof Error ? err.message : "Could not load the projects portfolio.",
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     refresh();
+    const onChange = () => refresh({ silent: true });
+    window.addEventListener("nlams:data-changed", onChange);
+    return () => window.removeEventListener("nlams:data-changed", onChange);
   }, []);
 
   const filtered = items.filter((p) =>
@@ -76,9 +106,48 @@ export function ProjectsPage() {
   const totalSelectedArea = selectedParcelsData.reduce((s, p) => s + p.totalArea, 0);
   const totalSelectedReqArea = selectedParcelsData.reduce((s, p) => s + p.requiredArea, 0);
 
+  // Mirrors the server-side zod contract so the user sees the problem before
+  // the request is rejected with a generic validation error.
+  const stepOneErrors = (): string[] => {
+    const problems: string[] = [];
+    if (name.trim().length < 3) problems.push("Project name must be at least 3 characters.");
+    if (!projCode.trim()) problems.push("Project code is required.");
+    if (dept.trim().length < 2) problems.push("Department is required.");
+    if (projType.trim().length < 2) problems.push("Project type is required.");
+    if (stateName.trim().length < 2) problems.push("State is required.");
+    if (district.trim().length < 2) problems.push("District is required.");
+    if (Number.isNaN(bufferMeters) || bufferMeters <= 0) problems.push("Corridor buffer must be greater than zero.");
+    return problems;
+  };
+
+  const goToParcelStep = () => {
+    const problems = stepOneErrors();
+    if (problems.length > 0) {
+      setFormError(problems.join(" "));
+      return;
+    }
+    setFormError("");
+    setFormStep(2);
+  };
+
+  const closeCreateModal = () => {
+    setShowCreateModal(false);
+    setFormError("");
+    setFormStep(1);
+  };
+
   const handleCreateProject = async () => {
+    const problems = stepOneErrors();
+    if (selectedParcelIds.length === 0) {
+      problems.push("Select at least one cadastral parcel.");
+    }
+    if (problems.length > 0) {
+      setFormError(problems.join(" "));
+      return;
+    }
     try {
       setCreating(true);
+      setFormError("");
       const res = await api<Project>("/projects", {
         method: "POST",
         body: JSON.stringify({
@@ -106,12 +175,11 @@ export function ProjectsPage() {
         }),
       });
 
-      setShowCreateModal(false);
-      setFormStep(1);
-      await refresh();
+      closeCreateModal();
+      await refresh({ silent: true });
       navigate(`/projects/${res.id}`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Creation failed");
+      setFormError(err instanceof Error ? err.message : "Project creation failed.");
     } finally {
       setCreating(false);
     }
@@ -119,23 +187,34 @@ export function ProjectsPage() {
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+      <div className="page-heading-row">
         <PageHeader
           title="Infrastructure Projects Portfolio"
           description="Monitored highway, railway, and state infrastructure corridors synchronized with statutory systems of record."
         />
-        <button className="button button-primary" onClick={() => setShowCreateModal(true)}>
-          <Plus size={16} /> Create Native Project
-        </button>
+        {canCreate && (
+          <button className="button button-primary" onClick={() => setShowCreateModal(true)}>
+            <Plus size={16} /> Create Native Project
+          </button>
+        )}
       </div>
+
+      <Alert tone="error" message={loadError} onDismiss={() => setLoadError("")} />
 
       <div className="filter-bar">
         <div className="field-search">
-          ⌕<input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search projects by name, code, state, or district…" />
+          ⌕<input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search projects by name, code, state, or district…"
+            aria-label="Search projects"
+          />
         </div>
         <button
           className="button button-secondary button-sm"
           onClick={() => csvDownload(filtered as any, "nlams-projects.csv")}
+          disabled={filtered.length === 0}
+          title={filtered.length === 0 ? "No projects to export" : "Download the current list as CSV"}
         >
           Export CSV
         </button>
@@ -163,7 +242,28 @@ export function ProjectsPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {loading && items.length === 0 ? (
+                <TableLoadingRow colSpan={9} label="Loading projects portfolio…" />
+              ) : loadError && items.length === 0 ? (
+                <tr>
+                  <td colSpan={9} style={{ padding: 0 }}>
+                    <ErrorBlock message={loadError} onRetry={() => refresh()} />
+                  </td>
+                </tr>
+              ) : filtered.length === 0 && query ? (
+                <tr>
+                  <td colSpan={9} style={{ textAlign: "center", padding: "36px 20px", color: "#64748b", fontSize: "12.5px" }}>
+                    No projects match “{query}”.{" "}
+                    <button
+                      className="button button-secondary button-sm"
+                      style={{ marginLeft: "8px" }}
+                      onClick={() => setQuery("")}
+                    >
+                      Clear search
+                    </button>
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={9} style={{ textAlign: "center", padding: "40px 20px" }}>
                     <div style={{ maxWidth: "480px", margin: "0 auto" }}>
@@ -174,13 +274,15 @@ export function ProjectsPage() {
                       <p style={{ fontSize: "12px", color: "#64748b", margin: "0 0 18px", lineHeight: "1.5" }}>
                         N-LAMS is in a clean baseline state. To demonstrate the system, choose one of the complementary workflows:
                       </p>
-                      <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
+                      <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
                         <Link to="/integrations" className="button button-secondary button-sm">
                           <RefreshCw size={14} /> Synchronize BhoomiRashi (Side A)
                         </Link>
-                        <button className="button button-primary button-sm" onClick={() => setShowCreateModal(true)}>
-                          <Plus size={14} /> Create Native Project (Side B)
-                        </button>
+                        {canCreate && (
+                          <button className="button button-primary button-sm" onClick={() => setShowCreateModal(true)}>
+                            <Plus size={14} /> Create Native Project (Side B)
+                          </button>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -236,80 +338,56 @@ export function ProjectsPage() {
       </div>
 
       {/* Multi-step Native Project Creation Modal (Side B Demo Hero!) */}
-      {showCreateModal && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0,0,0,0.55)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-          }}
-        >
-          <div className="panel" style={{ width: "720px", maxWidth: "95vw", padding: "22px", maxHeight: "90vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", paddingBottom: "12px", marginBottom: "14px" }}>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: 700, color: "#2563eb" }}>
-                  SIDE B DEMO · STEP {formStep} OF 2: {formStep === 1 ? "PROJECT PARAMETERS" : "PARCEL ASSOCIATION & SUBMISSION"}
-                </span>
-                <h2 style={{ fontSize: "17px", fontWeight: 700, margin: "2px 0", color: "#1e293b" }}>
-                  {formStep === 1 ? "Create Native N-LAMS Project" : "Select / Associate Cadastral Parcels"}
-                </h2>
-              </div>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b", fontSize: "16px" }}
-              >
-                ✕
-              </button>
-            </div>
-
-            {formStep === 1 ? (
+      <Modal
+        open={showCreateModal}
+        width={720}
+        onClose={closeCreateModal}
+        eyebrow={`SIDE B DEMO · STEP ${formStep} OF 2: ${formStep === 1 ? "PROJECT PARAMETERS" : "PARCEL ASSOCIATION & SUBMISSION"}`}
+        title={formStep === 1 ? "Create Native N-LAMS Project" : "Select / Associate Cadastral Parcels"}
+      >
+        <>
+          <Alert tone="error" message={formError} onDismiss={() => setFormError("")} />
+          {formStep === 1 ? (
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 <div style={{ background: "#f8fafc", padding: "8px 12px", borderRadius: "6px", fontSize: "11px", color: "#475569" }}>
                   <strong>Demo Jurisdiction:</strong> Haryana · Ambala District · State Infrastructure Authority Hierarchy.
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: "10px" }}>
+                <div className="form-row form-row-2">
                   <label className="input-label">
-                    Project Name
-                    <input value={name} onChange={(e) => setName(e.target.value)} />
+                    Project Name *
+                    <input value={name} onChange={(e) => setName(e.target.value)} required aria-invalid={name.trim().length < 3} />
                   </label>
                   <label className="input-label">
-                    Project Code
-                    <input value={projCode} onChange={(e) => setProjCode(e.target.value)} />
+                    Project Code *
+                    <input value={projCode} onChange={(e) => setProjCode(e.target.value)} required aria-invalid={!projCode.trim()} />
                   </label>
                 </div>
 
                 <label className="input-label">
-                  Department
-                  <input value={dept} onChange={(e) => setDept(e.target.value)} />
+                  Department *
+                  <input value={dept} onChange={(e) => setDept(e.target.value)} required />
                 </label>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div className="form-row form-row-2">
                   <label className="input-label">
                     Executing Project Authority
                     <input value={authority} onChange={(e) => setAuthority(e.target.value)} />
                   </label>
                   <label className="input-label">
-                    Project Type
-                    <input value={projType} onChange={(e) => setProjType(e.target.value)} />
+                    Project Type *
+                    <input value={projType} onChange={(e) => setProjType(e.target.value)} required />
                   </label>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
+                <div className="form-row form-row-3">
                   <label className="input-label">
-                    State
-                    <input value={stateName} onChange={(e) => setStateName(e.target.value)} />
+                    State *
+                    <input value={stateName} onChange={(e) => setStateName(e.target.value)} required />
                   </label>
                   <label className="input-label">
-                    District
-                    <input value={district} onChange={(e) => setDistrict(e.target.value)} />
+                    District *
+                    <input value={district} onChange={(e) => setDistrict(e.target.value)} required />
                   </label>
                   <label className="input-label">
                     Tehsil
@@ -317,14 +395,29 @@ export function ProjectsPage() {
                   </label>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: "10px" }}>
+                <div className="form-row form-row-3">
                   <label className="input-label">
                     Covered Villages
                     <input value={villages} onChange={(e) => setVillages(e.target.value)} />
                   </label>
                   <label className="input-label">
                     Target Date
-                    <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
+                    <input
+                      type="date"
+                      value={targetDate}
+                      min={new Date().toISOString().slice(0, 10)}
+                      onChange={(e) => setTargetDate(e.target.value)}
+                    />
+                  </label>
+                  <label className="input-label">
+                    Corridor Buffer (m) *
+                    <input
+                      type="number"
+                      min={1}
+                      value={bufferMeters}
+                      onChange={(e) => setBufferMeters(Number(e.target.value))}
+                      required
+                    />
                   </label>
                 </div>
 
@@ -333,11 +426,11 @@ export function ProjectsPage() {
                   <textarea rows={2} value={desc} onChange={(e) => setDesc(e.target.value)} style={{ width: "100%", padding: "6px 10px", fontSize: "12px", borderRadius: "6px", border: "1px solid #cbd5e1" }} />
                 </label>
 
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "10px" }}>
-                  <button className="button button-secondary" onClick={() => setShowCreateModal(false)}>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "10px", flexWrap: "wrap" }}>
+                  <button className="button button-secondary" onClick={closeCreateModal}>
                     Cancel
                   </button>
-                  <button className="button button-primary" onClick={() => setFormStep(2)}>
+                  <button className="button button-primary" onClick={goToParcelStep}>
                     Next: Select Parcels & GIS →
                   </button>
                 </div>
@@ -345,7 +438,7 @@ export function ProjectsPage() {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                 {/* Selected Metrics */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", background: "#eff6ff", padding: "10px 14px", borderRadius: "6px" }}>
+                <div className="selection-metrics">
                   <div>
                     <span style={{ fontSize: "10px", color: "#1e40af" }}>SELECTED PARCELS</span>
                     <strong style={{ display: "block", fontSize: "16px", color: "#1e3a8a" }}>{selectedParcelIds.length}</strong>
@@ -409,6 +502,13 @@ export function ProjectsPage() {
                       </tr>
                     </thead>
                     <tbody>
+                      {masterParcels.length === 0 && (
+                        <tr>
+                          <td colSpan={6} style={{ padding: "18px", textAlign: "center", color: "#64748b", fontSize: "11.5px" }}>
+                            No cadastral parcels are available in the master pool.
+                          </td>
+                        </tr>
+                      )}
                       {masterParcels.map((pcl) => {
                         const checked = selectedParcelIds.includes(pcl.id);
                         return (
@@ -447,8 +547,8 @@ export function ProjectsPage() {
                   </div>
                 </label>
 
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px" }}>
-                  <button className="button button-secondary" onClick={() => setFormStep(1)}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", gap: "8px", flexWrap: "wrap" }}>
+                  <button className="button button-secondary" onClick={() => setFormStep(1)} disabled={creating}>
                     ← Back to Details
                   </button>
                   <button className="button button-primary" onClick={handleCreateProject} disabled={creating || selectedParcelIds.length === 0}>
@@ -456,11 +556,15 @@ export function ProjectsPage() {
                     {creating ? "Submitting Project…" : submitImmediately ? "Create & Submit Project (SUBMITTED)" : "Save Project Draft"}
                   </button>
                 </div>
+                {selectedParcelIds.length === 0 && (
+                  <p style={{ fontSize: "11px", color: "#b45309", margin: 0, textAlign: "right" }}>
+                    Select at least one cadastral parcel to continue.
+                  </p>
+                )}
               </div>
             )}
-          </div>
-        </div>
-      )}
+        </>
+      </Modal>
     </>
   );
 }
@@ -468,18 +572,62 @@ export function ProjectsPage() {
 export function ProjectDetailsPage() {
   const { id } = useParams();
   const [project, setProject] = useState<Project | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const refresh = () => api<Project>(`/projects/${id}`).then(setProject).catch((err) => console.warn("Failed to load project:", err));
+  const refresh = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
+    try {
+      const data = await api<Project>(`/projects/${id}`);
+      setProject(data);
+      setLoadError("");
+    } catch (err) {
+      setLoadError(
+        err instanceof Error ? err.message : "This project could not be loaded.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  if (!project) return <div className="empty-state">Loading project…</div>;
+  if (loading && !project) {
+    return (
+      <section className="panel">
+        <LoadingBlock label="Loading project workspace…" />
+      </section>
+    );
+  }
+
+  if (!project) {
+    return (
+      <>
+        <Link to="/projects" className="back-link">
+          <ArrowLeft size={15} /> Back to projects
+        </Link>
+        <section className="panel">
+          <ErrorBlock
+            message={loadError || `No project found for reference “${id}”.`}
+            onRetry={() => refresh()}
+          />
+        </section>
+      </>
+    );
+  }
+
   const cases = Array.isArray(project.cases) ? project.cases : [];
   const parcels = Array.isArray(project.parcels) ? project.parcels : [];
+  // The API persists native drafts as "Draft"; accept any casing defensively.
+  const isDraft = (project.status || "").toUpperCase() === "DRAFT";
+  const alignment = Array.isArray(project.alignment) ? project.alignment : [];
+  const mapCenter: [number, number] = alignment[0] || [30.368, 76.782];
 
   const handleSubmitDraft = async () => {
     try {
@@ -488,7 +636,7 @@ export function ProjectDetailsPage() {
       setMessage("");
       const res = await api<any>(`/projects/${project.id}/submit`, { method: "POST" });
       setMessage(res.message || "Project submitted into statutory workflow!");
-      await refresh();
+      await refresh({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Submission failed");
     } finally {
@@ -524,7 +672,7 @@ export function ProjectDetailsPage() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <StatusBadge status={project.status} />
-          {project.status === "DRAFT" && (
+          {isDraft && (
             <button className="button button-primary" onClick={handleSubmitDraft} disabled={submitting}>
               <Send size={15} /> {submitting ? "Submitting…" : "SUBMIT PROJECT"}
             </button>
@@ -565,8 +713,9 @@ export function ProjectDetailsPage() {
         </div>
       )}
 
-      {message && <div className="login-note" style={{ background: "#ecfdf5", borderColor: "#a7f3d0", color: "#065f46" }}>{message}</div>}
-      {error && <div className="login-note" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>{error}</div>}
+      <Alert tone="success" message={message} onDismiss={() => setMessage("")} />
+      <Alert tone="error" message={error} onDismiss={() => setError("")} />
+      <Alert tone="warning" message={loadError} onDismiss={() => setLoadError("")} />
 
       {/* Top Stat Cards */}
       <div className="detail-stat-row">
@@ -586,6 +735,13 @@ export function ProjectDetailsPage() {
             </div>
           </div>
           <div className="case-list">
+            {cases.length === 0 && (
+              <div className="empty-state" style={{ padding: "30px 16px" }}>
+                {isDraft
+                  ? "Acquisition cases are generated once this draft project is submitted."
+                  : "No acquisition cases are linked to this project yet."}
+              </div>
+            )}
             {cases.map((c: any) => (
               <Link to={`/cases/${c.id}`} className="case-row" key={c.id}>
                 <div className="case-id">
@@ -618,7 +774,7 @@ export function ProjectDetailsPage() {
 
           <div style={{ height: "320px", width: "100%", borderRadius: "8px", overflow: "hidden", marginBottom: "12px" }}>
             <MapContainer
-              center={project.alignment[0] || [30.368, 76.782]}
+              center={mapCenter}
               zoom={12}
               scrollWheelZoom={false}
               style={{ height: "100%", width: "100%" }}
@@ -627,16 +783,22 @@ export function ProjectDetailsPage() {
                 attribution="&copy; OpenStreetMap contributors"
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-              {project.alignment && (
-                <Polyline positions={project.alignment} pathOptions={{ color: "#2563eb", weight: 4 }} />
+              {alignment.length > 1 && (
+                <Polyline positions={alignment} pathOptions={{ color: "#2563eb", weight: 4 }} />
               )}
-              {parcels.map((p: any) => (
+              {parcels
+                .filter((p: any) => Array.isArray(p?.geometry) && p.geometry.length > 2)
+                .map((p: any) => {
+                  const status: string = p.acquisitionStatus || "";
+                  const done = status === "POSSESSION_COMPLETED";
+                  const inFlight = status.includes("SUBMITTED") || status.includes("REVIEW");
+                  return (
                 <Polygon
                   key={p.id}
                   positions={p.geometry}
                   pathOptions={{
-                    color: p.acquisitionStatus === "POSSESSION_COMPLETED" ? "#16a34a" : p.acquisitionStatus.includes("SUBMITTED") ? "#2563eb" : "#f59e0b",
-                    fillColor: p.acquisitionStatus === "POSSESSION_COMPLETED" ? "#22c55e" : p.acquisitionStatus.includes("SUBMITTED") ? "#3b82f6" : "#fbbf24",
+                    color: done ? "#16a34a" : inFlight ? "#2563eb" : "#f59e0b",
+                    fillColor: done ? "#22c55e" : inFlight ? "#3b82f6" : "#fbbf24",
                     fillOpacity: 0.4,
                   }}
                 >
@@ -647,7 +809,8 @@ export function ProjectDetailsPage() {
                     <br />Status: <StatusBadge status={p.acquisitionStatus} />
                   </Popup>
                 </Polygon>
-              ))}
+                  );
+                })}
             </MapContainer>
           </div>
         </section>

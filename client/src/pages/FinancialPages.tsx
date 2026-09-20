@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   Calculator,
@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { api, currentUser } from "../api";
 import { PageHeader, StatusBadge } from "../components/common";
+import { Alert, ErrorBlock, Modal, TableLoadingRow } from "../components/ui";
 
 type Compensation = {
   id: string;
@@ -58,11 +59,23 @@ const canUpdate = () =>
     "RR_REVIEWER",
   ].includes(currentUser()?.role || "");
 
-function Metric({ label, value, sub, iconColor }: { label: string; value: string; sub?: string; iconColor?: string }) {
+function Metric({
+  label,
+  value,
+  sub,
+  iconColor,
+  icon,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  iconColor?: string;
+  icon?: ReactNode;
+}) {
   return (
     <div className="stat-card">
       <div className={`stat-icon ${iconColor || "blue"}`}>
-        <CircleDollarSign size={19} />
+        {icon || <CircleDollarSign size={19} />}
       </div>
       <div className="stat-label">{label}</div>
       <strong className="stat-value">{value}</strong>
@@ -89,10 +102,11 @@ export function CompensationPage() {
   const calculatedSolatium = calculatedBase * (solatiumPercent / 100);
   const calculatedTotal = calculatedBase + calculatedSolatium;
 
-  const refresh = async () => {
+  const refresh = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoaded(false);
     setError("");
     try {
-      setRows(await api<Compensation[]>("/compensation"));
+      setRows((await api<Compensation[]>("/compensation")) || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Compensation records could not be loaded.");
     } finally {
@@ -102,7 +116,24 @@ export function CompensationPage() {
 
   useEffect(() => {
     refresh();
+    const onChange = () => refresh({ silent: true });
+    window.addEventListener("nlams:data-changed", onChange);
+    return () => window.removeEventListener("nlams:data-changed", onChange);
   }, []);
+
+  // Seed the calculator from the record being assessed so the officer is not
+  // recomputing against an unrelated default area.
+  const openValuation = (row: Compensation) => {
+    setActiveValuationRow(row);
+    setBaseMarketRate(1500000);
+    setSolatiumPercent(100);
+    setMultiplierFactor(1.25);
+    setAreaInHa(
+      row.assessedAmount > 0
+        ? Number((row.assessedAmount / (1500000 * 1.25 * 2)).toFixed(2))
+        : 1.2,
+    );
+  };
 
   const totals = useMemo(
     () =>
@@ -119,6 +150,10 @@ export function CompensationPage() {
 
   const handleSaveAssessment = async () => {
     if (!activeValuationRow) return;
+    if (!(calculatedTotal > 0) || !Number.isFinite(calculatedTotal)) {
+      setError("Enter a positive circle rate, area and multiplier before saving the assessment.");
+      return;
+    }
     setBusy(activeValuationRow.id);
     try {
       await api(`/compensation/${activeValuationRow.id}`, {
@@ -134,7 +169,7 @@ export function CompensationPage() {
         )} (Base + ${solatiumPercent}% Solatium).`,
       );
       setActiveValuationRow(null);
-      await refresh();
+      await refresh({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Assessment update failed.");
     } finally {
@@ -145,7 +180,8 @@ export function CompensationPage() {
   async function handleApproveAward(row: Compensation) {
     setBusy(row.id);
     try {
-      const res = await api<any>(`/compensation/${row.id}`, {
+      // PATCH /compensation/:id responds with the updated record itself.
+      const updated = await api<Compensation>(`/compensation/${row.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           status: "APPROVED",
@@ -154,12 +190,12 @@ export function CompensationPage() {
       });
       setMessage(
         `Compensation Award approved for ${row.caseReference} (${money(
-          row.assessedAmount,
-        )}). Mock PFMS DBT disbursement automatically executed (Ref: ${
-          res.compensation?.paymentReference || "DEMO-PFMS-2026-HR01"
-        }).`,
+          updated.approvedAmount || row.assessedAmount,
+        )}). Mock PFMS DBT disbursement executed${
+          updated.paymentReference ? ` (Ref: ${updated.paymentReference})` : ""
+        }.`,
       );
-      await refresh();
+      await refresh({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Approval failed.");
     } finally {
@@ -174,9 +210,11 @@ export function CompensationPage() {
         method: "POST",
       });
       setMessage(
-        `PFMS DBT payment confirmed ${result.status} for ${row.caseReference} (Ref: ${result.paymentReference || "DEMO-PFMS-2026-HR01"}).`,
+        `PFMS DBT payment confirmed (${result.status}) for ${row.caseReference}${
+          result.paymentReference ? ` · Ref ${result.paymentReference}` : ""
+        }.`,
       );
-      await refresh();
+      await refresh({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "PFMS synchronization failed.");
     } finally {
@@ -199,8 +237,8 @@ export function CompensationPage() {
         </span>
       </div>
 
-      {message && <div className="login-note" style={{ background: "#ecfdf5", borderColor: "#a7f3d0", color: "#065f46" }}>{message}</div>}
-      {error && <div className="login-note" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>{error}</div>}
+      <Alert tone="success" message={message} onDismiss={() => setMessage("")} />
+      <Alert tone="error" message={error} onDismiss={() => setError("")} />
 
       <div className="stat-grid" style={{ marginBottom: "20px" }}>
         <Metric label="Total Assessed" value={money(totals.assessed)} iconColor="blue" />
@@ -227,7 +265,15 @@ export function CompensationPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
+              {!loaded && rows.length === 0 ? (
+                <TableLoadingRow colSpan={7} label="Loading compensation records…" />
+              ) : error && rows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ padding: 0 }}>
+                    <ErrorBlock message={error} onRetry={() => refresh()} />
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ textAlign: "center", padding: "40px 20px" }}>
                     <div style={{ maxWidth: "440px", margin: "0 auto" }}>
@@ -253,13 +299,13 @@ export function CompensationPage() {
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                         <strong>{money(row.assessedAmount)}</strong>
-                        {canUpdate() && row.status === "PENDING" && (
+                        {canUpdate() && (row.status === "PENDING" || row.status === "ASSESSED") && (
                           <button
                             className="button button-secondary button-sm"
                             style={{ padding: "2px 6px", fontSize: "10px" }}
-                            onClick={() => setActiveValuationRow(row)}
+                            onClick={() => openValuation(row)}
                           >
-                            <Calculator size={11} /> Recompute
+                            <Calculator size={11} /> {row.status === "PENDING" ? "Assess" : "Recompute"}
                           </button>
                         )}
                       </div>
@@ -311,122 +357,98 @@ export function CompensationPage() {
       </section>
 
       {/* VALUATION CALCULATOR MODAL */}
-      {activeValuationRow && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15, 23, 42, 0.65)",
-            backdropFilter: "blur(4px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-            padding: "20px",
-          }}
-        >
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: "12px",
-              width: "100%",
-              maxWidth: "540px",
-              boxShadow: "0 20px 40px rgba(0,0,0,0.25)",
-              border: "1px solid #cbd5e1",
-            }}
-          >
-            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <Calculator size={18} color="#2563eb" />
-                <h3 style={{ margin: 0, fontSize: "16px", color: "#1e293b" }}>Land Valuation & Compensation Assessment</h3>
-              </div>
-              <button onClick={() => setActiveValuationRow(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b" }}>
-                <X size={20} />
-              </button>
+      <Modal
+        open={!!activeValuationRow}
+        title="Land Valuation & Compensation Assessment"
+        onClose={() => setActiveValuationRow(null)}
+        footer={
+          <>
+            <button className="button button-secondary" onClick={() => setActiveValuationRow(null)} disabled={!!busy}>
+              Cancel
+            </button>
+            <button
+              className="button button-primary"
+              onClick={handleSaveAssessment}
+              disabled={!!busy || !(calculatedTotal > 0)}
+            >
+              {busy ? "Saving…" : "Save Compensation Assessment"}
+            </button>
+          </>
+        }
+      >
+        {activeValuationRow && (
+          <>
+            <div style={{ background: "#f8fafc", padding: "10px 14px", borderRadius: "6px", marginBottom: "16px", fontSize: "12px", color: "#334155" }}>
+              Case: <strong>{activeValuationRow.caseReference}</strong> · Parcel:{" "}
+              <strong>{activeValuationRow.parcelId}</strong> ({activeValuationRow.village})
             </div>
 
-            <div style={{ padding: "20px" }}>
-              <div style={{ background: "#f8fafc", padding: "10px 14px", borderRadius: "6px", marginBottom: "16px", fontSize: "12px", color: "#334155" }}>
-                Case: <strong>{activeValuationRow.caseReference}</strong> · Parcel: <strong>{activeValuationRow.parcelId}</strong> ({activeValuationRow.village})
-              </div>
+            <div className="form-row form-row-2" style={{ marginBottom: "14px" }}>
+              <label className="input-label">
+                BASE CIRCLE RATE (₹ / HA)
+                <input
+                  type="number"
+                  min={1}
+                  value={baseMarketRate}
+                  onChange={(e) => setBaseMarketRate(Number(e.target.value))}
+                />
+              </label>
+              <label className="input-label">
+                ACQUISITION AREA (HA)
+                <input
+                  type="number"
+                  min={0.01}
+                  step="0.1"
+                  value={areaInHa}
+                  onChange={(e) => setAreaInHa(Number(e.target.value))}
+                />
+              </label>
+              <label className="input-label">
+                RURAL MULTIPLIER (FACTOR)
+                <input
+                  type="number"
+                  min={0.1}
+                  step="0.05"
+                  value={multiplierFactor}
+                  onChange={(e) => setMultiplierFactor(Number(e.target.value))}
+                />
+              </label>
+              <label className="input-label">
+                STATUTORY SOLATIUM (%)
+                <input
+                  type="number"
+                  min={0}
+                  max={200}
+                  value={solatiumPercent}
+                  onChange={(e) => setSolatiumPercent(Number(e.target.value))}
+                />
+              </label>
+            </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "4px" }}>
-                    BASE CIRCLE RATE (₹ / HA)
-                  </label>
-                  <input
-                    type="number"
-                    value={baseMarketRate}
-                    onChange={(e) => setBaseMarketRate(Number(e.target.value))}
-                    style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "4px" }}>
-                    ACQUISITION AREA (HA)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={areaInHa}
-                    onChange={(e) => setAreaInHa(Number(e.target.value))}
-                    style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "4px" }}>
-                    RURAL MULTIPLIER (FACTOR)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={multiplierFactor}
-                    onChange={(e) => setMultiplierFactor(Number(e.target.value))}
-                    style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "4px" }}>
-                    STATUTORY SOLATIUM (%)
-                  </label>
-                  <input
-                    type="number"
-                    value={solatiumPercent}
-                    onChange={(e) => setSolatiumPercent(Number(e.target.value))}
-                    style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px" }}
-                  />
-                </div>
-              </div>
+            {!(calculatedTotal > 0) && (
+              <Alert
+                tone="warning"
+                message="Enter a positive circle rate, area and multiplier to compute a valid award."
+              />
+            )}
 
-              {/* Calculated Summary */}
-              <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: "14px", borderRadius: "8px", marginBottom: "16px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px", color: "#1e40af" }}>
-                  <span>Base Market Value (Rate × Area × Factor):</span>
-                  <strong>{money(Math.round(calculatedBase))}</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "6px", color: "#1e40af" }}>
-                  <span>Statutory Solatium ({solatiumPercent}% under RFCTLARR):</span>
-                  <strong>{money(Math.round(calculatedSolatium))}</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "14px", fontWeight: 700, color: "#1e3a8a", borderTop: "1px solid #93c5fd", paddingTop: "6px" }}>
-                  <span>Total Determined Compensation Award:</span>
-                  <span>{money(Math.round(calculatedTotal))}</span>
-                </div>
+            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: "14px", borderRadius: "8px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", fontSize: "12px", marginBottom: "4px", color: "#1e40af" }}>
+                <span>Base Market Value (Rate × Area × Factor):</span>
+                <strong>{money(Math.round(calculatedBase) || 0)}</strong>
               </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-                <button className="button button-secondary" onClick={() => setActiveValuationRow(null)}>
-                  Cancel
-                </button>
-                <button className="button button-primary" onClick={handleSaveAssessment} disabled={!!busy}>
-                  {busy ? "Saving…" : "Save Compensation Assessment"}
-                </button>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", fontSize: "12px", marginBottom: "6px", color: "#1e40af" }}>
+                <span>Statutory Solatium ({solatiumPercent}% under RFCTLARR):</span>
+                <strong>{money(Math.round(calculatedSolatium) || 0)}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", fontSize: "14px", fontWeight: 700, color: "#1e3a8a", borderTop: "1px solid #93c5fd", paddingTop: "6px" }}>
+                <span>Total Determined Compensation Award:</span>
+                <span>{money(Math.round(calculatedTotal) || 0)}</span>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Modal>
     </>
   );
 }
@@ -438,10 +460,11 @@ export function RRPage() {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState("");
 
-  const refresh = async () => {
+  const refresh = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoaded(false);
     setError("");
     try {
-      setRows(await api<RR[]>("/rr"));
+      setRows((await api<RR[]>("/rr")) || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "R&R records could not be loaded.");
     } finally {
@@ -451,6 +474,9 @@ export function RRPage() {
 
   useEffect(() => {
     refresh();
+    const onChange = () => refresh({ silent: true });
+    window.addEventListener("nlams:data-changed", onChange);
+    return () => window.removeEventListener("nlams:data-changed", onChange);
   }, []);
 
   async function handleDeliverBenefits(row: RR) {
@@ -464,7 +490,7 @@ export function RRPage() {
         }),
       });
       setMessage(`${row.caseReference} R&R entitlement package delivered to all ${row.eligibleFamilies} eligible families.`);
-      await refresh();
+      await refresh({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "R&R update failed.");
     } finally {
@@ -493,14 +519,14 @@ export function RRPage() {
         description="Monitoring affected and displaced families, entitlement packages, and verified benefit delivery under RFCTLARR framework."
       />
 
-      {message && <div className="login-note" style={{ background: "#ecfdf5", borderColor: "#a7f3d0", color: "#065f46" }}>{message}</div>}
-      {error && <div className="login-note" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>{error}</div>}
+      <Alert tone="success" message={message} onDismiss={() => setMessage("")} />
+      <Alert tone="error" message={error} onDismiss={() => setError("")} />
 
       <div className="stat-grid" style={{ marginBottom: "20px" }}>
-        <Metric label="Affected Families" value={String(totals.affected)} iconColor="blue" />
-        <Metric label="Displaced Families" value={String(totals.displaced)} iconColor="amber" />
-        <Metric label="Eligible for Entitlements" value={String(totals.eligible)} iconColor="purple" />
-        <Metric label="Benefits Delivered" value={`${totals.delivered} / ${totals.eligible}`} iconColor="green" />
+        <Metric label="Affected Families" value={String(totals.affected)} iconColor="blue" icon={<UsersRound size={19} />} />
+        <Metric label="Displaced Families" value={String(totals.displaced)} iconColor="amber" icon={<UsersRound size={19} />} />
+        <Metric label="Eligible for Entitlements" value={String(totals.eligible)} iconColor="purple" icon={<ShieldCheck size={19} />} />
+        <Metric label="Benefits Delivered" value={`${totals.delivered} / ${totals.eligible}`} iconColor="green" icon={<CheckCircle2 size={19} />} />
       </div>
 
       <section className="panel table-panel">
@@ -521,7 +547,15 @@ export function RRPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
+              {!loaded && rows.length === 0 ? (
+                <TableLoadingRow colSpan={7} label="Loading R&R records…" />
+              ) : error && rows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ padding: 0 }}>
+                    <ErrorBlock message={error} onRetry={() => refresh()} />
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ textAlign: "center", padding: "40px 20px" }}>
                     <div style={{ maxWidth: "440px", margin: "0 auto" }}>

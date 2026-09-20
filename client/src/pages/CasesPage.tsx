@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   Activity,
   ArrowLeft,
@@ -14,13 +14,14 @@ import {
   UploadCloud,
   User,
 } from "lucide-react";
-import { api, currentUser } from "../api";
+import { api } from "../api";
 import { PageHeader, ProgressBar, StatusBadge } from "../components/common";
+import { Alert, ErrorBlock, LoadingBlock, Modal, TableLoadingRow } from "../components/ui";
 import type { Case, DocumentRecord } from "../types";
 
 type Detail = Case & {
   tasks: any[];
-  activity: any[];
+  activity?: any[];
   parcel: any;
   project: any;
   compensation: any;
@@ -55,17 +56,48 @@ const stageDocRequirements: Record<string, string[]> = {
 
 export function CasesPage() {
   const [items, setItems] = useState<Case[]>([]);
-  const [q, setQ] = useState("");
-  const refresh = () => api<Case[]>("/cases").then(setItems).catch((err) => console.warn("Failed to load cases:", err));
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  // The topbar search deep-links here with ?q=…; keep the two in sync.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const q = searchParams.get("q") || "";
+
+  const setQ = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("q", value);
+    else next.delete("q");
+    setSearchParams(next, { replace: true });
+  };
+
+  const refresh = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
+    try {
+      setItems((await api<Case[]>("/cases")) || []);
+      setError("");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not load acquisition cases.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     refresh();
+    const onChange = () => refresh({ silent: true });
+    window.addEventListener("nlams:data-changed", onChange);
+    return () => window.removeEventListener("nlams:data-changed", onChange);
   }, []);
 
-  const filtered = items.filter((c) =>
-    `${c.caseId} ${c.projectName || ""} ${c.parcelId} ${c.village} ${c.surveyNumber || ""}`
-      .toLowerCase()
-      .includes(q.toLowerCase()),
+  const filtered = useMemo(
+    () =>
+      items.filter((c) =>
+        `${c.caseId} ${c.projectName || ""} ${c.parcelId} ${(c as any).parcelNumber || ""} ${c.village || ""} ${c.district || ""} ${c.surveyNumber || ""} ${c.officer || ""}`
+          .toLowerCase()
+          .includes(q.trim().toLowerCase()),
+      ),
+    [items, q],
   );
 
   return (
@@ -75,10 +107,22 @@ export function CasesPage() {
         description="Persistent canonical cases connected to authoritative references, field evidence, compensation, and R&R lifecycles."
       />
 
+      <Alert tone="error" message={error} onDismiss={() => setError("")} />
+
       <div className="filter-bar">
         <div className="field-search">
-          ⌕<input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by case ID, parcel ID, survey number, village…" />
+          ⌕<input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by case ID, parcel ID, survey number, village…"
+            aria-label="Search acquisition cases"
+          />
         </div>
+        {q && (
+          <button className="button button-secondary button-sm" onClick={() => setQ("")}>
+            Clear search
+          </button>
+        )}
       </div>
 
       <div className="panel table-panel">
@@ -102,7 +146,24 @@ export function CasesPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {loading && items.length === 0 ? (
+                <TableLoadingRow colSpan={8} label="Loading acquisition cases…" />
+              ) : error && items.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ padding: 0 }}>
+                    <ErrorBlock message={error} onRetry={() => refresh()} />
+                  </td>
+                </tr>
+              ) : filtered.length === 0 && q ? (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: "center", padding: "36px 20px", color: "#64748b", fontSize: "12.5px" }}>
+                    No acquisition cases match “{q}”.
+                    <button className="button button-secondary button-sm" style={{ marginLeft: "8px" }} onClick={() => setQ("")}>
+                      Clear search
+                    </button>
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={8} style={{ textAlign: "center", padding: "40px 20px" }}>
                     <div style={{ maxWidth: "440px", margin: "0 auto" }}>
@@ -130,8 +191,8 @@ export function CasesPage() {
                         </span>
                       </Link>
                     </td>
-                    <td>{c.projectName}</td>
-                    <td>{c.village}, {c.district}</td>
+                    <td>{c.projectName || "—"}</td>
+                    <td>{[c.village, c.district].filter(Boolean).join(", ") || "—"}</td>
                     <td><strong style={{ fontSize: "12px", color: "#2563eb" }}>{c.currentStage || c.stage}</strong></td>
                     <td>
                       <div className="table-progress">
@@ -160,6 +221,9 @@ export function CasesPage() {
 export function CaseDetailsPage() {
   const { id } = useParams();
   const [item, setItem] = useState<Detail | null>(null);
+  const [activity, setActivity] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -167,14 +231,59 @@ export function CaseDetailsPage() {
   const [docTitle, setDocTitle] = useState("");
   const [docFileName, setDocFileName] = useState("");
 
-  const refresh = () => api<Detail>(`/cases/${id}`).then(setItem).catch((err) => console.warn("Failed to load case detail:", err));
+  const refresh = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
+    try {
+      const detail = await api<Detail>(`/cases/${id}`);
+      setItem(detail);
+      // The detail payload carries the timeline, but fall back to the
+      // dedicated endpoint so the feed still works against older servers.
+      if (Array.isArray(detail.activity)) {
+        setActivity(detail.activity);
+      } else {
+        setActivity(await api<any[]>(`/cases/${id}/timeline`).catch(() => []));
+      }
+      setLoadError("");
+    } catch (err) {
+      setLoadError(
+        err instanceof Error ? err.message : "This acquisition case could not be loaded.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  if (!item) return <div className="empty-state">Loading acquisition case…</div>;
+  if (loading && !item) {
+    return (
+      <section className="panel">
+        <LoadingBlock label="Loading acquisition case…" />
+      </section>
+    );
+  }
 
-  const active = item.tasks.find((t) => ["PENDING", "IN_PROGRESS", "OVERDUE"].includes(t.status));
+  if (!item) {
+    return (
+      <>
+        <Link to="/cases" className="back-link">
+          <ArrowLeft size={15} /> Back to cases
+        </Link>
+        <section className="panel">
+          <ErrorBlock
+            message={loadError || `No acquisition case found for reference “${id}”.`}
+            onRetry={() => refresh()}
+          />
+        </section>
+      </>
+    );
+  }
+
+  const tasks: any[] = Array.isArray(item.tasks) ? item.tasks : [];
+  const active = tasks.find((t) => ["PENDING", "IN_PROGRESS", "OVERDUE"].includes(t.status));
   const docsReq = stageDocRequirements[item.currentStage] || ["Standard Acquisition Supporting Dossier"];
   const attachedDocs = item.documents || [];
 
@@ -196,7 +305,7 @@ export function CaseDetailsPage() {
         });
       }
       setMessage(res?.message || "Stage completed and workflow routed to next stage successfully.");
-      await refresh();
+      await refresh({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Stage completion failed");
     } finally {
@@ -205,9 +314,13 @@ export function CaseDetailsPage() {
   };
 
   const handleAttachDocument = async () => {
-    if (!docTitle || !docFileName) return;
+    if (!docTitle.trim() || !docFileName.trim()) {
+      setError("Provide both a document title and a file name before attaching.");
+      return;
+    }
     try {
       setBusy(true);
+      setError("");
       await api("/documents", {
         method: "POST",
         body: JSON.stringify({
@@ -227,7 +340,7 @@ export function CaseDetailsPage() {
       setDocTitle("");
       setDocFileName("");
       setMessage("Document attached successfully.");
-      await refresh();
+      await refresh({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -263,8 +376,9 @@ export function CaseDetailsPage() {
         </div>
       </div>
 
-      {message && <div className="login-note" style={{ background: "#ecfdf5", borderColor: "#a7f3d0", color: "#065f46" }}>{message}</div>}
-      {error && <div className="login-note" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>{error}</div>}
+      <Alert tone="success" message={message} onDismiss={() => setMessage("")} />
+      <Alert tone="error" message={error} onDismiss={() => setError("")} />
+      <Alert tone="warning" message={loadError} onDismiss={() => setLoadError("")} />
 
       {/* Hero Banner */}
       <div className="case-banner">
@@ -290,9 +404,9 @@ export function CaseDetailsPage() {
         </div>
       </div>
 
-      <div className="content-grid" style={{ gridTemplateColumns: "1.4fr 1fr" }}>
+      <div className="detail-grid">
         {/* Left: Workflow Stages & Activity Timeline */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        <div className="stack-20">
           {/* Workflow Tasks */}
           <section className="panel">
             <div className="panel-heading">
@@ -302,7 +416,12 @@ export function CaseDetailsPage() {
               </div>
             </div>
             <div className="case-list">
-              {item.tasks.map((t: any) => (
+              {tasks.length === 0 && (
+                <div className="empty-state" style={{ padding: "28px 16px" }}>
+                  No workflow tasks have been raised for this case yet.
+                </div>
+              )}
+              {tasks.map((t: any) => (
                 <div className="case-row" key={t.id}>
                   <div className="case-id">
                     <div className="case-symbol">
@@ -311,7 +430,7 @@ export function CaseDetailsPage() {
                     <div>
                       <strong>{t.stage?.name || "Workflow Stage"}</strong>
                       <span>
-                        Legal basis: {t.stage?.legalSection ? t.stage.legalSection : "Statutory policy"} · Due {new Date(t.dueAt).toLocaleDateString()}
+                        Legal basis: {t.stage?.legalSection ? t.stage.legalSection : "Statutory policy"} · Due {t.dueAt ? new Date(t.dueAt).toLocaleDateString() : "—"}
                       </span>
                       {t.assignedUser && (
                         <small style={{ color: "#2563eb", display: "block" }}>
@@ -331,14 +450,14 @@ export function CaseDetailsPage() {
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <h2>Chronological Case Activity Timeline ({item.activity?.length || 0})</h2>
+                <h2>Chronological Case Activity Timeline ({activity.length})</h2>
                 <p>Immutable event trail tracking all transitions, reviews, and documents</p>
               </div>
             </div>
             <div style={{ padding: "14px 18px" }}>
-              {item.activity && item.activity.length > 0 ? (
+              {activity.length > 0 ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  {item.activity.map((act: any) => (
+                  {activity.map((act: any) => (
                     <div
                       key={act.id}
                       style={{
@@ -365,14 +484,21 @@ export function CaseDetailsPage() {
                   ))}
                 </div>
               ) : (
-                <div className="empty-state">No timeline events recorded yet.</div>
+                <div className="empty-state">
+                  <span>No timeline events recorded yet.</span>
+                  <small style={{ fontSize: "11px" }}>
+                    {item.project?.sourceType === "EXTERNAL"
+                      ? "This case is mirrored from an external system of record — its workflow history lives in that system."
+                      : "Events are recorded automatically as the case moves through statutory stages."}
+                  </small>
+                </div>
               )}
             </div>
           </section>
         </div>
 
         {/* Right: Parcel Overview, Documents & Financials */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        <div className="stack-20">
           {/* Parcel Overview */}
           <section className="panel">
             <div className="panel-heading">
@@ -455,13 +581,13 @@ export function CaseDetailsPage() {
                 <div>
                   <span style={{ fontSize: "11px", color: "#64748b" }}>Assessed Amount</span>
                   <strong style={{ display: "block", fontSize: "14px", color: "#1e293b" }}>
-                    ₹{item.compensation.assessedAmount.toLocaleString("en-IN")}
+                    ₹{Number(item.compensation.assessedAmount || 0).toLocaleString("en-IN")}
                   </strong>
                 </div>
                 <div>
                   <span style={{ fontSize: "11px", color: "#64748b" }}>Paid Amount</span>
                   <strong style={{ display: "block", fontSize: "14px", color: "#16a34a" }}>
-                    ₹{item.compensation.paidAmount.toLocaleString("en-IN")}
+                    ₹{Number(item.compensation.paidAmount || 0).toLocaleString("en-IN")}
                   </strong>
                 </div>
               </div>
@@ -498,44 +624,48 @@ export function CaseDetailsPage() {
       </div>
 
       {/* Upload Document Modal */}
-      {showUploadModal && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0,0,0,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-          }}
-        >
-          <div className="panel" style={{ width: "480px", maxWidth: "90vw", padding: "20px" }}>
-            <h3 style={{ fontSize: "15px", fontWeight: 700, margin: "0 0 12px", color: "#1e293b" }}>
-              Attach Statutory Supporting Document
-            </h3>
-            <label className="input-label">
-              Document Title
-              <input value={docTitle} onChange={(e) => setDocTitle(e.target.value)} placeholder="e.g. Ground Survey Field Sheet" />
-            </label>
-            <label className="input-label" style={{ marginTop: "8px" }}>
-              File Name
-              <input value={docFileName} onChange={(e) => setDocFileName(e.target.value)} placeholder="e.g. DEMO-SURVEY-SHEET-145-2.pdf" />
-            </label>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
-              <button className="button button-secondary" onClick={() => setShowUploadModal(false)}>
-                Cancel
-              </button>
-              <button className="button button-primary" onClick={handleAttachDocument} disabled={busy || !docTitle || !docFileName}>
-                Attach & Validate
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal
+        open={showUploadModal}
+        width={480}
+        title="Attach Statutory Supporting Document"
+        onClose={() => setShowUploadModal(false)}
+        footer={
+          <>
+            <button className="button button-secondary" onClick={() => setShowUploadModal(false)} disabled={busy}>
+              Cancel
+            </button>
+            <button
+              className="button button-primary"
+              onClick={handleAttachDocument}
+              disabled={busy || !docTitle.trim() || !docFileName.trim()}
+            >
+              {busy ? "Attaching…" : "Attach & Validate"}
+            </button>
+          </>
+        }
+      >
+        <label className="input-label">
+          Document Title *
+          <input
+            value={docTitle}
+            onChange={(e) => setDocTitle(e.target.value)}
+            placeholder="e.g. Ground Survey Field Sheet"
+            required
+          />
+        </label>
+        <label className="input-label" style={{ marginTop: "8px" }}>
+          File Name *
+          <input
+            value={docFileName}
+            onChange={(e) => setDocFileName(e.target.value)}
+            placeholder="e.g. DEMO-SURVEY-SHEET-145-2.pdf"
+            required
+          />
+        </label>
+        <p style={{ fontSize: "11px", color: "#64748b", marginTop: "10px", marginBottom: 0 }}>
+          A synthetic SHA-256 checksum and storage reference are generated for the demo registry.
+        </p>
+      </Modal>
     </>
   );
 }

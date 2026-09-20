@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   Camera,
   CheckCircle2,
@@ -13,9 +13,13 @@ import {
   UploadCloud,
   X,
 } from "lucide-react";
-import { MapContainer, Polygon, Polyline, Popup, TileLayer, Marker } from "react-leaflet";
+import { MapContainer, Polygon, Polyline, TileLayer } from "react-leaflet";
 import { api, currentUser } from "../api";
 import { PageHeader, StatusBadge } from "../components/common";
+import { Alert, ErrorBlock, LoadingBlock } from "../components/ui";
+
+const DEMO_LAT = 30.3642;
+const DEMO_LNG = 76.7815;
 
 export function FieldTasksPage() {
   const [tasks, setTasks] = useState<any[]>([]);
@@ -37,25 +41,33 @@ export function FieldTasksPage() {
     "Physical boundaries verified on site. Land is under seasonal cultivation; no residential structure or active encroachment observed within the 100m corridor.",
   );
   const [isDemoGps, setIsDemoGps] = useState(true);
-  const [latitude, setLatitude] = useState(30.3642);
-  const [longitude, setLongitude] = useState(76.7815);
+  const [latitude, setLatitude] = useState(DEMO_LAT);
+  const [longitude, setLongitude] = useState(DEMO_LNG);
+  const [gpsBusy, setGpsBusy] = useState(false);
+  const [gpsNote, setGpsNote] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [photoUrls, setPhotoUrls] = useState<string[]>([
     "https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=600&auto=format&fit=crop&q=80",
   ]);
 
-  const navigate = useNavigate();
   const user = currentUser();
 
-  const fetchTasks = async () => {
+  const fetchTasks = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
     try {
-      setLoading(true);
-      const data = await api<any[]>("/tasks/my");
+      const data = (await api<any[]>("/tasks/my")) || [];
       setTasks(data);
-      if (data.length > 0 && !selectedTask) {
-        setSelectedTask(data[0]);
-      }
+      setLoadError("");
+      // Keep the pane in sync: re-point at the refreshed record, or fall back
+      // to the next task once the current one has been submitted.
+      setSelectedTask((current: any) => {
+        if (!current) return data[0] || null;
+        return data.find((t) => t.id === current.id) || data[0] || null;
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load field tasks");
+      setLoadError(
+        err instanceof Error ? err.message : "Failed to load field tasks",
+      );
     } finally {
       setLoading(false);
     }
@@ -65,25 +77,47 @@ export function FieldTasksPage() {
     fetchTasks();
   }, []);
 
+  // Reset the capture form whenever a different task is opened.
+  useEffect(() => {
+    setGpsNote("");
+  }, [selectedTask?.id]);
+
+  /** Switches between the demo coordinate and a real device fix. */
   const handleCaptureGps = () => {
-    if (navigator.geolocation && !isDemoGps) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setLatitude(pos.coords.latitude);
-          setLongitude(pos.coords.longitude);
-          setIsDemoGps(false);
-        },
-        () => {
-          setIsDemoGps(true);
-          setLatitude(30.3642);
-          setLongitude(76.7815);
-        },
-      );
-    } else {
+    if (!isDemoGps) {
       setIsDemoGps(true);
-      setLatitude(30.3642);
-      setLongitude(76.7815);
+      setLatitude(DEMO_LAT);
+      setLongitude(DEMO_LNG);
+      setGpsNote("Reverted to the demo coordinate.");
+      return;
     }
+    if (!navigator.geolocation) {
+      setGpsNote("This browser does not expose device location — keeping the demo coordinate.");
+      return;
+    }
+    setGpsBusy(true);
+    setGpsNote("Requesting device location…");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLatitude(pos.coords.latitude);
+        setLongitude(pos.coords.longitude);
+        setIsDemoGps(false);
+        setGpsBusy(false);
+        setGpsNote(`Device fix captured (±${Math.round(pos.coords.accuracy)} m).`);
+      },
+      (geoError) => {
+        setIsDemoGps(true);
+        setLatitude(DEMO_LAT);
+        setLongitude(DEMO_LNG);
+        setGpsBusy(false);
+        setGpsNote(
+          geoError.code === geoError.PERMISSION_DENIED
+            ? "Location permission denied — using the demo coordinate."
+            : "Device location unavailable — using the demo coordinate.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
   };
 
   const handleAddSamplePhoto = () => {
@@ -130,10 +164,10 @@ export function FieldTasksPage() {
         description="Physical boundary verification, cadastral ground checks, and geo-tagged photographic evidence capture."
       />
 
-      {message && <div className="login-note" style={{ background: "#ecfdf5", borderColor: "#a7f3d0", color: "#065f46" }}>{message}</div>}
-      {error && <div className="login-note" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>{error}</div>}
+      <Alert tone="success" message={message} onDismiss={() => setMessage("")} />
+      <Alert tone="error" message={error} onDismiss={() => setError("")} />
 
-      <div className="content-grid project-grid" style={{ gridTemplateColumns: "1fr 1.6fr" }}>
+      <div className="workspace-grid">
         {/* Left: Task List */}
         <section className="panel">
           <div className="panel-heading">
@@ -144,10 +178,17 @@ export function FieldTasksPage() {
             <span className="live-dot" />
           </div>
 
-          {loading ? (
-            <div className="empty-state">Loading assigned tasks…</div>
+          {loading && tasks.length === 0 ? (
+            <LoadingBlock label="Loading assigned tasks…" />
+          ) : loadError && tasks.length === 0 ? (
+            <ErrorBlock message={loadError} onRetry={() => fetchTasks()} />
           ) : tasks.length === 0 ? (
-            <div className="empty-state">No pending field verification tasks assigned.</div>
+            <div className="empty-state">
+              <span>No pending field verification tasks assigned.</span>
+              <small style={{ fontSize: "11px" }}>
+                Tasks appear here once a District Officer approves the administrative review for a parcel in your jurisdiction.
+              </small>
+            </div>
           ) : (
             <div className="case-list">
               {tasks.map((t) => {
@@ -155,7 +196,16 @@ export function FieldTasksPage() {
                 return (
                   <div
                     key={t.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={isCurrent}
                     onClick={() => setSelectedTask(t)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedTask(t);
+                      }
+                    }}
                     className={`case-row ${isCurrent ? "active-task-row" : ""}`}
                     style={{
                       cursor: "pointer",
@@ -168,8 +218,13 @@ export function FieldTasksPage() {
                         <ClipboardCheck size={16} />
                       </div>
                       <div>
-                        <strong>{t.parcel?.parcelId || "Parcel"} · Survey {t.parcel?.surveyNumber}</strong>
-                        <span>{t.case?.caseId} · {t.parcel?.village}</span>
+                        <strong>
+                          {t.parcel?.parcelId || "Parcel"}
+                          {t.parcel?.surveyNumber ? ` · Survey ${t.parcel.surveyNumber}` : ""}
+                        </strong>
+                        <span>
+                          {[t.case?.caseId, t.parcel?.village, t.stage?.name].filter(Boolean).join(" · ")}
+                        </span>
                       </div>
                     </div>
                     <div>
@@ -188,8 +243,15 @@ export function FieldTasksPage() {
             <div className="panel-heading">
               <div>
                 <div className="eyebrow">FIELD VERIFICATION PROTOCOL</div>
-                <h2>{selectedTask.parcel?.parcelId} — Survey {selectedTask.parcel?.surveyNumber}</h2>
-                <p>{selectedTask.project?.name} · {selectedTask.parcel?.village}, {selectedTask.parcel?.district}</p>
+                <h2>
+                  {selectedTask.parcel?.parcelId || selectedTask.case?.caseId || "Assigned task"}
+                  {selectedTask.parcel?.surveyNumber ? ` — Survey ${selectedTask.parcel.surveyNumber}` : ""}
+                </h2>
+                <p>
+                  {[selectedTask.project?.name, selectedTask.parcel?.village, selectedTask.parcel?.district]
+                    .filter(Boolean)
+                    .join(" · ") || "Jurisdiction details unavailable"}
+                </p>
               </div>
               <StatusBadge status={selectedTask.status} />
             </div>
@@ -197,6 +259,7 @@ export function FieldTasksPage() {
             {/* Map Preview */}
             <div style={{ height: "220px", width: "100%", borderRadius: "8px", overflow: "hidden", marginBottom: "16px", border: "1px solid #e2e8f0" }}>
               <MapContainer
+                key={`${selectedTask.id}-${latitude.toFixed(4)}-${longitude.toFixed(4)}`}
                 center={[latitude, longitude]}
                 zoom={14}
                 scrollWheelZoom={false}
@@ -206,10 +269,10 @@ export function FieldTasksPage() {
                   attribution="&copy; OpenStreetMap contributors"
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
-                {selectedTask.project?.alignment && (
+                {Array.isArray(selectedTask.project?.alignment) && selectedTask.project.alignment.length > 1 && (
                   <Polyline positions={selectedTask.project.alignment} pathOptions={{ color: "#2563eb", weight: 4 }} />
                 )}
-                {selectedTask.parcel?.geometry && (
+                {Array.isArray(selectedTask.parcel?.geometry) && selectedTask.parcel.geometry.length > 2 && (
                   <Polygon
                     positions={selectedTask.parcel.geometry}
                     pathOptions={{ color: "#f59e0b", fillColor: "#fbbf24", fillOpacity: 0.4 }}
@@ -223,7 +286,7 @@ export function FieldTasksPage() {
               <h3 style={{ fontSize: "13px", fontWeight: 700, marginBottom: "8px", color: "#1e293b" }}>
                 1. Physical Inspection Checklist
               </h3>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <div className="checkbox-grid">
                 <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#334155" }}>
                   <input
                     type="checkbox"
@@ -278,8 +341,15 @@ export function FieldTasksPage() {
                     type="button"
                     className="button button-secondary button-sm"
                     onClick={handleCaptureGps}
+                    disabled={gpsBusy}
+                    title={isDemoGps ? "Capture a live device fix instead" : "Switch back to the demo coordinate"}
                   >
-                    <Navigation size={13} /> {isDemoGps ? "DEMO GPS (30.3642, 76.7815)" : "Device GPS"}
+                    <Navigation size={13} className={gpsBusy ? "spin-icon" : ""} />
+                    {gpsBusy
+                      ? "Locating…"
+                      : isDemoGps
+                        ? `Use device GPS (demo: ${DEMO_LAT}, ${DEMO_LNG})`
+                        : `Device fix ${latitude.toFixed(4)}, ${longitude.toFixed(4)} — reset`}
                   </button>
                   <button
                     type="button"
@@ -290,6 +360,10 @@ export function FieldTasksPage() {
                   </button>
                 </div>
               </div>
+
+              {gpsNote && (
+                <p style={{ fontSize: "11px", color: "#64748b", margin: "0 0 8px" }}>{gpsNote}</p>
+              )}
 
               {/* Photo Thumbnails */}
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
@@ -306,6 +380,26 @@ export function FieldTasksPage() {
                     }}
                   >
                     <img src={url} alt={`Site evidence ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    {photoUrls.length > 1 && (
+                      <button
+                        type="button"
+                        aria-label={`Remove site photo ${i + 1}`}
+                        onClick={() => setPhotoUrls((prev) => prev.filter((_, index) => index !== i))}
+                        style={{
+                          position: "absolute",
+                          top: "3px",
+                          right: "3px",
+                          background: "rgba(15,23,42,.72)",
+                          color: "#fff",
+                          border: 0,
+                          borderRadius: "4px",
+                          lineHeight: 0,
+                          padding: "3px",
+                        }}
+                      >
+                        <X size={11} />
+                      </button>
+                    )}
                     <span
                       style={{
                         position: "absolute",
@@ -346,14 +440,16 @@ export function FieldTasksPage() {
             </div>
 
             {/* Action Bar */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #e2e8f0", paddingTop: "14px" }}>
-              <span style={{ fontSize: "11px", color: "#64748b" }}>
-                Submission transfers task to Reviewer (REV-AMB-01) for approval.
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #e2e8f0", paddingTop: "14px", gap: "12px", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "11px", color: "#64748b", flex: 1, minWidth: "200px" }}>
+                {remarks.trim().length < 10
+                  ? "Enter at least 10 characters of field remarks before submitting."
+                  : "Submission transfers the task to the Revenue Scrutiny Officer for approval."}
               </span>
               <button
                 className="button button-primary"
                 onClick={handleSubmitVerification}
-                disabled={submitting || selectedTask.status === "COMPLETED"}
+                disabled={submitting || selectedTask.status === "COMPLETED" || remarks.trim().length < 10}
               >
                 <Send size={15} />
                 {submitting ? "Submitting…" : selectedTask.status === "COMPLETED" ? "Verification Submitted" : "Submit Verification"}

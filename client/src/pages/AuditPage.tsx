@@ -8,8 +8,38 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { api } from "../api";
+import { api, csvDownload } from "../api";
 import { PageHeader } from "../components/common";
+import { Alert, ErrorBlock, Modal, TableLoadingRow } from "../components/ui";
+
+/**
+ * Filters are matched against the action identifiers the API actually emits
+ * (PROJECT_CREATED, TASK_APPROVED, FIELD_VERIFIED, COMPENSATION_PAID, …).
+ */
+const ACTION_FILTERS: { id: string; label: string; match: (action: string) => boolean }[] = [
+  { id: "ALL", label: "All events", match: () => true },
+  { id: "PROJECT", label: "Projects", match: (a) => a.includes("PROJECT") },
+  { id: "TASK", label: "Approvals & tasks", match: (a) => a.includes("TASK") || a.includes("APPROVED") },
+  { id: "FIELD", label: "Field verification", match: (a) => a.includes("FIELD") },
+  { id: "COMPENSATION", label: "Compensation & PFMS", match: (a) => a.includes("COMPENSATION") || a.includes("PFMS") || a.includes("PAYMENT") },
+  { id: "RR", label: "R&R", match: (a) => a.startsWith("RR_") || a.includes("_RR") },
+  { id: "POSSESSION", label: "Possession", match: (a) => a.includes("POSSESSION") },
+  { id: "DOCUMENT", label: "Documents", match: (a) => a.includes("DOCUMENT") },
+  { id: "SYNC", label: "Integrations", match: (a) => a.includes("SYNC") || a.includes("EXTERNAL") },
+];
+
+/** Best-effort one-line summary of an audit record's metadata payload. */
+function describeAudit(row: any): string {
+  const meta = row?.metadata || {};
+  const preferred = meta.remarks || meta.reason || meta.name || meta.stage || meta.title;
+  if (preferred) return String(preferred);
+  const entries = Object.entries(meta).filter(([, value]) => value !== null && value !== undefined && value !== "");
+  if (entries.length === 0) return "Statutory mutation recorded";
+  return entries
+    .slice(0, 3)
+    .map(([key, value]) => `${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
+    .join(" · ");
+}
 
 export function AuditPage() {
   const [rows, setRows] = useState<any[]>([]);
@@ -19,29 +49,33 @@ export function AuditPage() {
   const [actionFilter, setActionFilter] = useState("ALL");
   const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
 
-  useEffect(() => {
-    async function loadAudit() {
-      try {
-        setLoading(true);
-        const data = await api<any[]>("/audit");
-        setRows(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load audit trail");
-      } finally {
-        setLoading(false);
-      }
+  const loadAudit = async () => {
+    try {
+      setLoading(true);
+      setRows((await api<any[]>("/audit")) || []);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load audit trail");
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
     loadAudit();
+    const onChange = () => loadAudit();
+    window.addEventListener("nlams:data-changed", onChange);
+    return () => window.removeEventListener("nlams:data-changed", onChange);
   }, []);
 
   const filteredRows = rows.filter((r) => {
-    const matchesAction = actionFilter === "ALL" || r.action.includes(actionFilter);
-    const matchesSearch =
-      r.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.actorId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (r.entityId && r.entityId.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (r.entityType && r.entityType.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesAction && matchesSearch;
+    const action: string = r.action || "";
+    const filter = ACTION_FILTERS.find((f) => f.id === actionFilter) || ACTION_FILTERS[0];
+    if (!filter.match(action)) return false;
+    const needle = searchQuery.trim().toLowerCase();
+    if (!needle) return true;
+    return [action, r.actorId, r.actorRole, r.entityId, r.entityType, JSON.stringify(r.metadata || {})]
+      .some((field) => (field || "").toLowerCase().includes(needle));
   });
 
   return (
@@ -59,37 +93,40 @@ export function AuditPage() {
         </span>
       </div>
 
-      {error && <div className="login-note" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>{error}</div>}
+      <Alert tone="error" message={error} onDismiss={() => setError("")} />
 
       {/* Filter Toolbar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
-        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          {["ALL", "PROJECT", "STAGE", "FIELD", "COMPENSATION", "PFMS", "POSSESSION", "DEMO"].map((cat) => (
+      <div className="list-toolbar">
+        <div className="toolbar-group">
+          {ACTION_FILTERS.map((cat) => (
             <button
-              key={cat}
-              className={`button button-sm ${actionFilter === cat ? "button-primary" : "button-secondary"}`}
-              onClick={() => setActionFilter(cat)}
+              key={cat.id}
+              className={`button button-sm ${actionFilter === cat.id ? "button-primary" : "button-secondary"}`}
+              onClick={() => setActionFilter(cat.id)}
             >
-              {cat}
+              {cat.label}
             </button>
           ))}
         </div>
 
-        <div style={{ position: "relative", width: "260px" }}>
-          <input
-            type="text"
-            placeholder="Search action, actor, entity…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "6px 10px 6px 28px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e1",
-              fontSize: "12px",
-            }}
-          />
-          <Search size={14} style={{ position: "absolute", left: "8px", top: "9px", color: "#64748b" }} />
+        <div className="toolbar-group">
+          <div className="search-field">
+            <Search size={14} />
+            <input
+              type="search"
+              placeholder="Search action, actor, entity…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              aria-label="Search audit trail"
+            />
+          </div>
+          <button
+            className="button button-secondary button-sm"
+            onClick={() => csvDownload(filteredRows, "nlams-audit-trail.csv")}
+            disabled={filteredRows.length === 0}
+          >
+            Export CSV
+          </button>
         </div>
       </div>
 
@@ -111,10 +148,30 @@ export function AuditPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredRows.length === 0 ? (
+              {loading && rows.length === 0 ? (
+                <TableLoadingRow colSpan={6} label="Loading immutable audit trail…" />
+              ) : error && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "#64748b" }}>
+                  <td colSpan={6} style={{ padding: 0 }}>
+                    <ErrorBlock message={error} onRetry={loadAudit} />
+                  </td>
+                </tr>
+              ) : filteredRows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "26px", color: "#64748b", fontSize: "12.5px" }}>
                     No audit records match the current filter.
+                    {(actionFilter !== "ALL" || searchQuery) && (
+                      <button
+                        className="button button-secondary button-sm"
+                        style={{ marginLeft: "8px" }}
+                        onClick={() => {
+                          setActionFilter("ALL");
+                          setSearchQuery("");
+                        }}
+                      >
+                        Reset filters
+                      </button>
+                    )}
                   </td>
                 </tr>
               ) : (
@@ -155,17 +212,20 @@ export function AuditPage() {
                     <td>
                       <div>
                         <strong>{r.actorId}</strong>
+                        {r.actorRole && (
+                          <div style={{ fontSize: "10px", color: "#64748b" }}>{r.actorRole}</div>
+                        )}
                       </div>
                     </td>
                     <td>
                       <div>
                         <span className="mono" style={{ fontSize: "11px", fontWeight: 600 }}>{r.entityType}</span>
-                        <div className="mono" style={{ fontSize: "10px", color: "#64748b" }}>{r.entityId}</div>
+                        <div className="mono" style={{ fontSize: "10px", color: "#64748b" }}>{r.entityId || "—"}</div>
                       </div>
                     </td>
                     <td>
-                      <span style={{ fontSize: "11px", color: "#475569" }}>
-                        {r.payload?.remarks || r.payload?.reason || r.payload?.name || "Statutory mutation recorded"}
+                      <span style={{ fontSize: "11px", color: "#475569", display: "block", maxWidth: "320px" }}>
+                        {describeAudit(r)}
                       </span>
                     </td>
                     <td>
@@ -186,64 +246,33 @@ export function AuditPage() {
       </section>
 
       {/* PAYLOAD INSPECTION MODAL */}
-      {selectedEvent && (
-        <div
+      <Modal
+        open={!!selectedEvent}
+        width={560}
+        title="Audit Event Payload"
+        eyebrow={selectedEvent ? `${selectedEvent.action} · ${selectedEvent.id}` : undefined}
+        onClose={() => setSelectedEvent(null)}
+        footer={
+          <button className="button button-secondary button-sm" onClick={() => setSelectedEvent(null)}>
+            Close
+          </button>
+        }
+      >
+        <pre
           style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15, 23, 42, 0.65)",
-            backdropFilter: "blur(4px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-            padding: "20px",
+            background: "#0f172a",
+            color: "#38bdf8",
+            padding: "16px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            overflowX: "auto",
+            maxHeight: "360px",
+            margin: 0,
           }}
         >
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: "12px",
-              width: "100%",
-              maxWidth: "560px",
-              boxShadow: "0 20px 40px rgba(0,0,0,0.25)",
-              border: "1px solid #cbd5e1",
-            }}
-          >
-            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: "15px", color: "#1e293b" }}>Audit Event Payload</h3>
-                <span style={{ fontSize: "11px", color: "#64748b" }}>{selectedEvent.action} · {selectedEvent.id}</span>
-              </div>
-              <button onClick={() => setSelectedEvent(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b" }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <div style={{ padding: "20px" }}>
-              <pre
-                style={{
-                  background: "#0f172a",
-                  color: "#38bdf8",
-                  padding: "16px",
-                  borderRadius: "8px",
-                  fontSize: "12px",
-                  overflowX: "auto",
-                  maxHeight: "360px",
-                }}
-              >
-                {JSON.stringify(selectedEvent, null, 2)}
-              </pre>
-            </div>
-
-            <div style={{ padding: "12px 20px", borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "flex-end" }}>
-              <button className="button button-secondary button-sm" onClick={() => setSelectedEvent(null)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          {JSON.stringify(selectedEvent, null, 2)}
+        </pre>
+      </Modal>
     </>
   );
 }

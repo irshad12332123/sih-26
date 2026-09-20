@@ -3,3 +3,230 @@
 @media(max-width:1100px){.sidebar{width:220px}.main-shell{margin-left:220px;width:calc(100% - 220px)}.page-content{padding:28px 24px}.case-layout{grid-template-columns:1fr}.case-side{display:grid;grid-template-columns:1fr 1fr}.case-id{min-width:220px}.case-banner-meta{gap:12px}.login-copy h1{font-size:38px}}
 @media(max-width:800px){.sidebar{transform:translateX(-100%);transition:.2s;width:250px;box-shadow:10px 0 30px #16213c33}.sidebar.sidebar-open{transform:none}.mobile-close,.menu-button{display:grid}.main-shell{margin-left:0;width:100%}.topbar{padding:0 17px}.menu-button{margin-right:2px}.crumb{display:none}.global-search{width:145px}.top-profile>div:not(.avatar),.top-profile>svg{display:none}.top-profile{padding-left:10px}.page-content{padding:24px 16px 38px}.page-heading{align-items:flex-start;flex-direction:column}.heading-actions{width:100%}.heading-actions .button{flex:1}.page-heading h1{font-size:25px}.trust-banner{align-items:flex-start;flex-wrap:wrap}.trust-banner a{margin-left:46px}.stat-grid{grid-template-columns:1fr 1fr}.content-grid,.dashboard-grid,.reports-grid,.project-grid{grid-template-columns:1fr}.second-row{margin-top:15px}.detail-stat-row{grid-template-columns:1fr 1fr}.detail-heading{align-items:flex-start;flex-direction:column;gap:15px}.case-banner{align-items:flex-start;flex-direction:column;gap:17px}.case-banner-meta{width:100%;justify-content:space-between}.case-banner-meta span:first-child{border-left:0;padding-left:0}.case-layout{grid-template-columns:1fr}.case-side{display:flex}.filter-bar,.map-toolbar{flex-wrap:wrap}.filter-bar .field-search,.map-toolbar .field-search{width:100%}.filter-bar .button:last-child{margin-left:0}.full-map-panel{height:650px;grid-template-columns:1fr}.map-sidebar{display:none}.integration-grid{grid-template-columns:1fr}.report-cards{grid-template-columns:1fr}.login-page{grid-template-columns:1fr}.login-left{min-height:410px;padding:28px 28px}.login-copy{margin:45px 0 20px}.login-copy h1{font-size:32px}.login-proof{margin-top:18px;gap:9px}.login-footer{display:none}.login-form-wrap{padding:40px 25px}.donut-center{left:27%}}
 @media(max-width:500px){.page-content{padding-left:12px;padding-right:12px}.stat-card{padding:13px}.stat-value{font-size:22px}.stat-label{font-size:10px}.chart-footer{gap:7px;flex-wrap:wrap}.chart-footer strong{margin-left:0;width:100%}.case-banner-meta{gap:8px}.case-banner-meta span{padding-left:8px}.case-banner-meta strong{font-size:10px}.task-body{align-items:flex-start;flex-direction:column}.stepper{padding-left:10px;padding-right:10px}.step{min-width:95px}.detail-stat-row{gap:8px}.mini-stat{padding:12px}.mini-stat strong{font-size:17px}.document-row{flex-wrap:wrap}.doc-updated{margin-left:0}.full-map-panel{height:470px}.map-status-legend{top:auto;bottom:10px;left:10px;right:10px;flex-wrap:wrap}.login-left{min-height:390px}.login-copy h1{font-size:29px}}
+
+/* ==========================================================================
+   Shared UI primitives: alerts, modals, skeletons, responsive layout helpers
+   ========================================================================== */
+
+/* -- Inline alert banners (success / error / info) ------------------------- */
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 12.5px;
+  line-height: 1.45;
+  margin-bottom: 16px;
+}
+.alert svg { flex-shrink: 0; margin-top: 1px; }
+.alert-body { flex: 1; min-width: 0; }
+.alert-success { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+.alert-error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+.alert-info { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+.alert-warning { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+.alert-dismiss {
+  background: none;
+  border: 0;
+  color: inherit;
+  opacity: .55;
+  padding: 0;
+  line-height: 0;
+  margin-left: 4px;
+}
+.alert-dismiss:hover { opacity: 1; }
+
+/* -- Modal dialog ---------------------------------------------------------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, .62);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+  overflow-y: auto;
+}
+.modal-card {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, .28);
+  width: 100%;
+  max-width: 540px;
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+  margin: auto;
+}
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.modal-head h3 { margin: 0; font: 600 16px 'Space Grotesk'; color: #1e293b; }
+.modal-eyebrow { font-size: 11px; font-weight: 700; color: #2563eb; letter-spacing: .04em; }
+.modal-close {
+  background: none;
+  border: 0;
+  color: #64748b;
+  line-height: 0;
+  padding: 4px;
+  border-radius: 6px;
+}
+.modal-close:hover { background: #f1f5f9; color: #0f172a; }
+.modal-body { padding: 18px 20px; overflow-y: auto; }
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 20px;
+  border-top: 1px solid #e2e8f0;
+  flex-wrap: wrap;
+}
+.modal-foot .modal-foot-start { margin-right: auto; }
+
+/* -- Loading skeletons ----------------------------------------------------- */
+@keyframes nlams-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
+@keyframes nlams-spin { to { transform: rotate(360deg) } }
+.spin-icon { animation: nlams-spin .9s linear infinite; }
+.skeleton {
+  background: #e7edf4;
+  border-radius: 6px;
+  animation: nlams-pulse 1.4s ease-in-out infinite;
+}
+.skeleton-row { height: 14px; margin: 10px 0; }
+.skeleton-card { height: 92px; }
+.loading-block {
+  padding: 40px 20px;
+  text-align: center;
+  color: #7c8798;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+/* -- Responsive layout helpers (replace hard-coded inline grids) ----------- */
+.split-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.workspace-grid { display: grid; grid-template-columns: 1fr 1.6fr; gap: 20px; align-items: start; }
+.detail-grid { display: grid; grid-template-columns: 1.45fr 1fr; gap: 20px; align-items: start; }
+.stack-20 { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.gis-layout { display: grid; grid-template-columns: 330px 1fr; gap: 16px; height: calc(100vh - 250px); min-height: 540px; }
+.gis-rail { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; min-height: 0; }
+.gis-canvas { padding: 0; overflow: hidden; position: relative; border-radius: 10px; min-height: 380px; }
+
+/* Page header with a trailing action button */
+.page-heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.page-heading-row .page-heading { flex: 1; min-width: 240px; }
+
+/* Scrollable tab strip */
+.tab-row { display: flex; gap: 8px; border-bottom: 1px solid #e2e8f0; margin-bottom: 20px; overflow-x: auto; padding-bottom: 1px; }
+.tab-row .button { flex-shrink: 0; border-radius: 8px 8px 0 0; border-bottom: none; }
+
+/* Mobile sidebar dismiss overlay */
+.sidebar-backdrop { display: none; }
+
+/* Risk marker for completed / low-risk rows */
+.risk-marker.low { background: #37a875; }
+
+/* Toolbar used on Documents / Audit pages */
+.list-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.list-toolbar .toolbar-group { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.search-field { position: relative; width: 240px; max-width: 100%; }
+.search-field input { width: 100%; padding: 7px 10px 7px 29px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 12px; outline: 0; background: #fff; color: #334155; }
+.search-field input:focus { border-color: #7991df; }
+.search-field svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: #64748b; pointer-events: none; }
+
+@media (max-width: 1100px) {
+  .gis-layout { grid-template-columns: 290px 1fr; }
+}
+
+@media (max-width: 900px) {
+  .detail-grid, .workspace-grid, .split-grid { grid-template-columns: 1fr; }
+  .gis-layout { grid-template-columns: 1fr; height: auto; min-height: 0; }
+  .gis-rail { overflow: visible; }
+  .gis-canvas { height: 420px; }
+}
+
+@media (max-width: 800px) {
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(9, 16, 33, .5);
+    z-index: 29;
+  }
+  .topbar { gap: 10px; }
+  .top-actions { gap: 10px; }
+  .page-heading-row { flex-direction: column; align-items: stretch; }
+  .page-heading-row > .button { width: 100%; }
+  .detail-stat-row { grid-template-columns: 1fr 1fr; }
+  .search-field { width: 100%; }
+  .list-toolbar { align-items: stretch; }
+  .modal-card { max-height: calc(100vh - 32px); }
+}
+
+@media (max-width: 560px) {
+  .stat-grid { grid-template-columns: 1fr; }
+  .detail-stat-row { grid-template-columns: 1fr; }
+  .parcel-metrics { grid-template-columns: 1fr; }
+  .modal-backdrop { padding: 10px; }
+  .modal-foot { justify-content: stretch; }
+  .modal-foot .button { flex: 1; }
+}
+
+/* Topbar: keep the demo-reset control from crowding narrow viewports. */
+.reset-demo-button { display: flex; align-items: center; gap: 6px; }
+@media (max-width: 800px) {
+  .reset-demo-label { display: none; }
+  .reset-demo-button { padding: 0 9px; }
+}
+
+/* Dashboard role call-to-action strip. */
+.role-banner {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.role-banner-copy { flex: 1; min-width: 220px; }
+.role-banner-copy strong { font-size: 14px; display: block; }
+.role-banner-copy p { margin: 3px 0 0; font-size: 12px; line-height: 1.45; }
+@media (max-width: 640px) {
+  .role-banner > .button { width: 100%; }
+}
+
+/* Multi-column form rows that collapse on narrow screens. */
+.form-row { display: grid; gap: 10px; }
+.form-row-2 { grid-template-columns: 1.4fr 1fr; }
+.form-row-3 { grid-template-columns: repeat(3, 1fr); }
+.selection-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  background: #eff6ff;
+  padding: 10px 14px;
+  border-radius: 6px;
+}
+@media (max-width: 640px) {
+  .form-row-2, .form-row-3 { grid-template-columns: 1fr; }
+  .selection-metrics { grid-template-columns: 1fr 1fr; }
+}
+
+/* Two-column checkbox groups that stack on small screens. */
+.checkbox-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (max-width: 640px) { .checkbox-grid { grid-template-columns: 1fr; } }

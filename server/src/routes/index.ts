@@ -290,6 +290,21 @@ api.get("/dashboard/summary", (_req: Request, res: Response) => {
   const highRisk = cases.filter((c) =>
     ["High", "HIGH", "Critical"].includes(c?.risk || ""),
   ).length;
+  const affectedFamilies = rr.reduce(
+    (sum, item) => sum + (Number(item?.affectedFamilies) || 0),
+    0,
+  );
+  const eligibleFamilies = rr.reduce(
+    (sum, item) => sum + (Number(item?.eligibleFamilies) || 0),
+    0,
+  );
+  const benefitsDelivered = rr.reduce(
+    (sum, item) => sum + (Number(item?.benefitsDelivered) || 0),
+    0,
+  );
+  const possessionCompleted = possession.filter(
+    (pr) => pr?.status === "POSSESSION_COMPLETED",
+  ).length;
 
   res.json({
     data: {
@@ -336,17 +351,34 @@ api.get("/dashboard/summary", (_req: Request, res: Response) => {
         (sum, item) => sum + (Number(item?.paidAmount) || 0),
         0,
       ),
-      rrFamiliesAffected: rr.reduce(
-        (sum, item) => sum + (Number(item?.affectedFamilies) || 0),
-        0,
-      ),
-      rrFamiliesDelivered: rr.reduce(
-        (sum, item) => sum + (Number(item?.benefitsDelivered) || 0),
-        0,
-      ),
-      possessionsCompleted: possession.filter(
-        (pr) => pr?.status === "POSSESSION_COMPLETED",
+      rrFamiliesAffected: affectedFamilies,
+      rrFamiliesEligible: eligibleFamilies,
+      rrFamiliesDelivered: benefitsDelivered,
+      // Aliases consumed by the dashboard widgets.
+      affectedFamilies,
+      eligibleFamilies,
+      benefitsDelivered,
+      rrPending: rr.filter((item) => item?.status !== "COMPLETED").length,
+      possessionsCompleted: possessionCompleted,
+      possessionCompleted,
+      candidateParcels: parcels.filter(
+        (p) => !["POSSESSION_COMPLETED", "ACQUIRED"].includes(p?.acquisitionStatus || ""),
       ).length,
+      pendingApprovals: tasks.filter(
+        (t) => t?.status === "PENDING" || t?.status === "IN_PROGRESS",
+      ).length,
+      pendingFieldVerifications: tasks.filter(
+        (t) =>
+          t?.stageId === "stage-field-ver" &&
+          (t?.status === "PENDING" || t?.status === "IN_PROGRESS"),
+      ).length,
+      pendingReviews: tasks.filter(
+        (t) =>
+          t?.stageId === "stage-evidence-rev" &&
+          (t?.status === "PENDING" || t?.status === "IN_PROGRESS"),
+      ).length,
+      compensationPending: compensation.filter((item) => item?.status !== "PAID")
+        .length,
       externalProjectsCount: projects.filter(
         (p) => p?.sourceType === "EXTERNAL",
       ).length,
@@ -428,9 +460,52 @@ api.post(
     const state = loadState();
     const user = (req as any).user;
     const projectRecordId = `prj-native-${Date.now()}`;
-    const projectCode =
+    const projectCode = (
       input.projectId ||
-      `HR-INFRA-2026-${String(state.projects.length + 1).padStart(3, "0")}`;
+      `HR-INFRA-2026-${String(state.projects.length + 1).padStart(3, "0")}`
+    ).trim();
+
+    // Project codes are the human reference used across cases, documents and
+    // reports — they must stay unique.
+    if (state.projects.some((p) => p.projectId.toLowerCase() === projectCode.toLowerCase())) {
+      return res.status(409).json({
+        error: {
+          code: "DUPLICATE_PROJECT_CODE",
+          message: `Project code ${projectCode} is already in use. Choose a different code.`,
+        },
+      });
+    }
+
+    const requestedParcelIds = input.selectedParcelIds?.length
+      ? input.selectedParcelIds
+      : ["pcl-hr-amb-001", "pcl-hr-amb-002", "pcl-hr-amb-003"];
+    // Unknown ids used to be silently dropped, producing a project with no
+    // parcels and therefore no cases.
+    const unknown = requestedParcelIds.filter(
+      (pid) => !state.masterParcelsPool.some((mp) => mp.id === pid || mp.parcelId === pid),
+    );
+    if (unknown.length > 0) {
+      return res.status(400).json({
+        error: {
+          code: "UNKNOWN_PARCEL",
+          message: `Unknown cadastral parcel(s): ${unknown.join(", ")}.`,
+        },
+      });
+    }
+
+    const unavailable = requestedParcelIds.filter((pid) =>
+      state.parcels.some(
+        (assigned) => assigned.id === pid || assigned.parcelId === pid,
+      ),
+    );
+    if (unavailable.length > 0) {
+      return res.status(409).json({
+        error: {
+          code: "PARCEL_ALREADY_ASSIGNED",
+          message: `Cadastral parcel(s) ${unavailable.join(", ")} are already associated with another project.`,
+        },
+      });
+    }
 
     const newProject: Project = {
       id: projectRecordId,
@@ -468,11 +543,7 @@ api.post(
     };
 
     // Associate Master Cadastral Parcels
-    const selectedIds = input.selectedParcelIds || [
-      "pcl-hr-amb-001",
-      "pcl-hr-amb-002",
-      "pcl-hr-amb-003",
-    ];
+    const selectedIds = requestedParcelIds;
     const associatedParcels: Parcel[] = [];
 
     for (const pid of selectedIds) {
@@ -542,6 +613,17 @@ api.post(
         .json({ error: { code: "NOT_FOUND", message: "Project not found" } });
     }
 
+    // Submitting twice would re-create the same cases, compensation, R&R and
+    // possession records with identical ids.
+    if (project.status !== "Draft" && project.status !== "DRAFT") {
+      return res.status(409).json({
+        error: {
+          code: "ALREADY_SUBMITTED",
+          message: `Project ${project.projectId} has already been submitted (current status: ${project.status}).`,
+        },
+      });
+    }
+
     project.status = "Submitted";
     project.progress = 10;
     const projectParcels = state.parcels.filter(
@@ -578,10 +660,17 @@ function executeProjectSubmission(
     projectId: project.id,
   });
 
+  // Derive a short, stable project discriminator so case references stay
+  // unique across projects (e.g. NLA-HR-INFRA-2026-001-0001).
+  const projectSlug = (project.projectId || project.id)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
   for (let i = 0; i < parcels.length; i++) {
     const p = parcels[i];
     const caseId = `case-${project.id}-${i + 1}`;
-    const caseReference = `NLA-HR-2026-000${i + 1}`;
+    const caseReference = `NLA-${projectSlug}-${String(i + 1).padStart(4, "0")}`;
 
     const newCase: Case = {
       id: caseId,
@@ -888,10 +977,17 @@ api.get("/cases/:id", (req: Request, res: Response) => {
   const assignedOfficer = state.users.find(
     (u) => u.email === c.assignedOfficerId || u.id === c.assignedOfficerId,
   );
+  const activity = state.caseActivities
+    .filter((a) => a.caseId === c.id)
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
 
   res.json({
     data: {
       ...c,
+      activity,
       projectName: project?.name || c.acquisitionPurpose,
       village: parcel?.village || project?.village,
       district: parcel?.district || project?.district,
@@ -916,9 +1012,22 @@ api.get("/cases/:id", (req: Request, res: Response) => {
 
 api.get("/cases/:id/timeline", (req: Request, res: Response) => {
   const state = loadState();
-  const activities = state.caseActivities.filter(
-    (a) => a.caseId === req.params.id,
+  // Callers may pass either the internal record id or the canonical case
+  // reference (NLA-…), matching the behaviour of GET /cases/:id.
+  const target = state.cases.find(
+    (c) => c.id === req.params.id || c.caseId === req.params.id,
   );
+  if (!target) {
+    return res
+      .status(404)
+      .json({ error: { code: "NOT_FOUND", message: "Case not found" } });
+  }
+  const activities = state.caseActivities
+    .filter((a) => a.caseId === target.id)
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
   res.json({ data: activities });
 });
 
@@ -1041,6 +1150,29 @@ api.get("/tasks/my", requireAuth, (req: Request, res: Response) => {
 
   res.json({ data: hydrated });
 });
+
+// Recomputes the aggregate land figures a project reports on dashboards and
+// reports from the current state of its parcels.
+// Externally synchronised projects are skipped: BhoomiRashi remains the system
+// of record for their figures, so N-LAMS must not overwrite what it imported.
+function recalculateProjectLand(
+  state: ReturnType<typeof loadState>,
+  project: Project | null | undefined,
+) {
+  if (!project || project.sourceType === "EXTERNAL") return;
+  const projectParcels = state.parcels.filter((p) => p.projectId === project.id);
+  if (projectParcels.length === 0) return;
+  project.affectedParcelsCount = projectParcels.length;
+  project.landRequiredHa = Number(
+    projectParcels.reduce((sum, p) => sum + (Number(p.requiredArea) || 0), 0).toFixed(2),
+  );
+  project.landAcquiredHa = Number(
+    projectParcels
+      .filter((p) => ["POSSESSION_COMPLETED", "ACQUIRED"].includes(p.acquisitionStatus || ""))
+      .reduce((sum, p) => sum + (Number(p.requiredArea) || 0), 0)
+      .toFixed(2),
+  );
+}
 
 // Centralized Workflow Stage Advancement Function
 export function executeStageAdvancement(
@@ -1234,6 +1366,7 @@ export function executeStageAdvancement(
   }
 
   // Update Project progress
+  recalculateProjectLand(state, relatedProject);
   if (relatedProject) {
     const projectCases = state.cases.filter(
       (cas) => cas.projectId === relatedProject.id,
@@ -1297,6 +1430,25 @@ function handleTaskApproveOrComplete(req: Request, res: Response) {
     return res
       .status(404)
       .json({ error: { code: "NOT_FOUND", message: "Task not found" } });
+  }
+
+  // Re-approving a finished task would duplicate documents, tasks and
+  // downstream records, so it is rejected outright.
+  if (task.status === "COMPLETED") {
+    return res.status(409).json({
+      error: {
+        code: "TASK_ALREADY_COMPLETED",
+        message: "This task has already been completed and cannot be approved again.",
+      },
+    });
+  }
+  if (task.status === "REJECTED") {
+    return res.status(409).json({
+      error: {
+        code: "TASK_REJECTED",
+        message: "This task was rejected. A fresh task must be raised before it can be approved.",
+      },
+    });
   }
 
   const stage = state.workflowStages.find((s) => s.id === task.stageId);
@@ -1375,6 +1527,15 @@ function handleCaseAdvance(req: Request, res: Response) {
     return res
       .status(404)
       .json({ error: { code: "NOT_FOUND", message: "Case not found" } });
+  }
+
+  if (targetCase.status === "Completed") {
+    return res.status(409).json({
+      error: {
+        code: "CASE_COMPLETED",
+        message: `Case ${targetCase.caseId} is already complete — there is no stage left to advance.`,
+      },
+    });
   }
 
   // Find active task or match stage by case's currentStage
@@ -1459,6 +1620,15 @@ api.post(
         .json({ error: { code: "NOT_FOUND", message: "Task not found" } });
     }
 
+    if (task.status === "COMPLETED") {
+      return res.status(409).json({
+        error: {
+          code: "TASK_ALREADY_COMPLETED",
+          message: "Field verification has already been submitted for this task.",
+        },
+      });
+    }
+
     const input = req.body || {};
     const relatedCase = state.cases.find((c) => c.id === task.caseId);
     const relatedParcel = relatedCase
@@ -1505,6 +1675,7 @@ api.post(
     if (relatedParcel) {
       relatedParcel.acquisitionStatus = "FIELD_VERIFIED";
     }
+    recalculateProjectLand(state, relatedProject);
 
     // Auto-generate Field Verification Report Document
     const docId = `doc-field-${Date.now()}`;
@@ -1695,6 +1866,9 @@ api.post(
       "WARNING",
       "TASK",
       correctionTask.id,
+      relatedCase?.projectId,
+      relatedCase?.id,
+      correctionTask.id,
     );
 
     saveState();
@@ -1744,15 +1918,51 @@ api.patch(
     }
 
     const { assessedAmount, approvedAmount, status } = req.body;
+    const wantsApproval = status === "APPROVED" || approvedAmount !== undefined;
+
+    if (item.status === "PAID" && wantsApproval) {
+      return res.status(409).json({
+        error: {
+          code: "ALREADY_DISBURSED",
+          message: `Compensation for ${item.caseReference} has already been approved and disbursed (${item.paymentReference}).`,
+        },
+      });
+    }
 
     if (assessedAmount !== undefined) {
-      item.assessedAmount = Number(assessedAmount);
+      const parsedAssessed = Number(assessedAmount);
+      if (!Number.isFinite(parsedAssessed) || parsedAssessed <= 0) {
+        return res.status(400).json({
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Assessed amount must be a positive number.",
+          },
+        });
+      }
+      if (item.status === "PAID") {
+        return res.status(409).json({
+          error: {
+            code: "ALREADY_DISBURSED",
+            message: `Compensation for ${item.caseReference} has already been disbursed and cannot be re-assessed.`,
+          },
+        });
+      }
+      item.assessedAmount = Math.round(parsedAssessed);
       item.status = "ASSESSED";
     }
 
-    if (status === "APPROVED" || approvedAmount !== undefined) {
+    if (wantsApproval) {
+      const parsedApproved = Number(approvedAmount ?? item.assessedAmount);
+      if (!Number.isFinite(parsedApproved) || parsedApproved <= 0) {
+        return res.status(400).json({
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Approved award amount must be a positive number.",
+          },
+        });
+      }
       item.status = "APPROVED";
-      item.approvedAmount = Number(approvedAmount || item.assessedAmount);
+      item.approvedAmount = Math.round(parsedApproved);
 
       // Attach Statutory Compensation Award Document
       const docId = `doc-award-${Date.now()}`;
@@ -1865,6 +2075,23 @@ api.post(
         });
     }
 
+    if (item.status === "PAID") {
+      return res.status(409).json({
+        error: {
+          code: "ALREADY_DISBURSED",
+          message: `Payment for ${item.caseReference} is already reconciled (${item.paymentReference}).`,
+        },
+      });
+    }
+    if (item.status !== "APPROVED") {
+      return res.status(409).json({
+        error: {
+          code: "NOT_APPROVED",
+          message: `Compensation for ${item.caseReference} must be approved before a PFMS disbursement can be reconciled.`,
+        },
+      });
+    }
+
     const paymentRef = `DEMO-PFMS-2026-${randomUUID().slice(0, 8).toUpperCase()}`;
     item.status = "PAID";
     item.paidAmount = item.approvedAmount || item.assessedAmount;
@@ -1923,6 +2150,15 @@ api.patch(
       benefitsDelivered,
       status,
     } = req.body;
+
+    if (item.status === "COMPLETED") {
+      return res.status(409).json({
+        error: {
+          code: "ALREADY_COMPLETED",
+          message: `R&R entitlements for ${item.caseReference} have already been delivered.`,
+        },
+      });
+    }
 
     if (affectedFamilies !== undefined)
       item.affectedFamilies = Number(affectedFamilies);
@@ -2041,6 +2277,15 @@ api.patch(
         });
     }
 
+    if (item.status === "POSSESSION_COMPLETED") {
+      return res.status(409).json({
+        error: {
+          code: "ALREADY_COMPLETED",
+          message: `Possession for ${item.caseReference} has already been recorded.`,
+        },
+      });
+    }
+
     item.status = "POSSESSION_COMPLETED";
     item.possessionDate = new Date().toISOString();
     item.officerId = user.email;
@@ -2056,6 +2301,10 @@ api.patch(
     if (relatedParcel) {
       relatedParcel.acquisitionStatus = "POSSESSION_COMPLETED";
     }
+    recalculateProjectLand(
+      state,
+      state.projects.find((p) => p.id === relatedCase?.projectId),
+    );
 
     // Attach Statutory Form 3E Possession Certificate Document
     const docId = `doc-pos-${Date.now()}`;

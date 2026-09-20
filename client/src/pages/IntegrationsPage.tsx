@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { PageHeader } from "../components/common";
+import { Alert, ErrorBlock, LoadingBlock } from "../components/ui";
 
 export function IntegrationsPage() {
   const [systems, setSystems] = useState<any[]>([]);
@@ -20,17 +21,23 @@ export function IntegrationsPage() {
   const [syncSummary, setSyncSummary] = useState<any | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [testingSystem, setTestingSystem] = useState("");
 
-  const refresh = async () => {
+  const refresh = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
     try {
       const [sys, maps] = await Promise.all([
         api<any[]>("/integrations"),
         api<any[]>("/integrations/mappings"),
       ]);
-      setSystems(sys);
-      setMappings(maps);
+      setSystems(sys || []);
+      setMappings(maps || []);
+      setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load integrations");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -43,30 +50,38 @@ export function IntegrationsPage() {
       setSyncing(true);
       setError("");
       setMessage("");
+      setSyncSummary(null);
       setSyncProgress(["Connecting to BhoomiRashi mock adapter…"]);
 
-      await new Promise((r) => setTimeout(r, 400));
-      setSyncProgress((p) => [...p, "✓ External Project fetched: BR-NH-2026-0042 (NH-44 Ambala Greenfield Corridor Package)"]);
-
-      await new Promise((r) => setTimeout(r, 400));
-      setSyncProgress((p) => [...p, "✓ 6 Cadastral Parcel references & spatial geometries reconciled (Demo Kalan / Demo Khurd)"]);
-
-      await new Promise((r) => setTimeout(r, 400));
-      setSyncProgress((p) => [...p, "✓ External compensation, R&R entitlements, and site possession records synchronized"]);
-
       const res = await api<any>("/integrations/bhoomirashi/sync", { method: "POST" });
+
+      // Log lines are derived from the adapter response rather than asserted
+      // up-front, so a failed sync never prints success ticks.
+      setSyncProgress([
+        "Connecting to BhoomiRashi mock adapter…",
+        `✓ External project fetched: ${res.project?.externalProjectId || "BR-NH-2026-0042"} (${res.project?.name || "NH-44 Ambala Greenfield Corridor Package"})`,
+        `✓ ${res.parcelReferences ?? 0} cadastral parcel references & spatial geometries reconciled`,
+        "✓ External compensation, R&R entitlements, and site possession records synchronized",
+        res.isNew
+          ? "✓ New external project registered in the N-LAMS unified view"
+          : "✓ Existing external project updated in place (idempotent re-sync)",
+      ]);
 
       setSyncSummary({
         projectCode: res.project?.projectId || "NLAMS-EXT-00042",
         externalId: res.project?.externalProjectId || "BR-NH-2026-0042",
-        parcelsCount: res.parcelReferences || 6,
-        statusUpdates: res.statusUpdates || 6,
+        parcelsCount: res.parcelReferences ?? 0,
+        statusUpdates: res.statusUpdates ?? 0,
         errors: 0,
       });
 
-      setMessage("BhoomiRashi synchronization completed successfully. External project is now visible in N-LAMS unified view.");
-      await refresh();
+      setMessage(
+        res.message ||
+          "BhoomiRashi synchronization completed. The external project is now visible in the N-LAMS unified view.",
+      );
+      await refresh({ silent: true });
     } catch (err) {
+      setSyncProgress((p) => [...p, "✗ Synchronization aborted."]);
       setError(err instanceof Error ? err.message : "Sync failed");
     } finally {
       setSyncing(false);
@@ -74,12 +89,19 @@ export function IntegrationsPage() {
   };
 
   const handleGenericSync = async (systemKey: string) => {
+    if (testingSystem) return;
     try {
-      await api(`/integrations/${systemKey}/sync`, { method: "POST" });
-      setMessage(`${systemKey} mock synchronization completed.`);
-      await refresh();
+      setTestingSystem(systemKey);
+      setError("");
+      const res = await api<any>(`/integrations/${encodeURIComponent(systemKey)}/sync`, {
+        method: "POST",
+      });
+      setMessage(res?.message || `${systemKey} mock synchronization completed.`);
+      await refresh({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed");
+    } finally {
+      setTestingSystem("");
     }
   };
 
@@ -106,8 +128,8 @@ export function IntegrationsPage() {
         </div>
       </div>
 
-      {message && <div className="login-note" style={{ background: "#ecfdf5", borderColor: "#a7f3d0", color: "#065f46" }}>{message}</div>}
-      {error && <div className="login-note" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>{error}</div>}
+      <Alert tone="success" message={message} onDismiss={() => setMessage("")} />
+      <Alert tone="error" message={error} onDismiss={() => setError("")} />
 
       {/* Before / After Synchronization Indicator */}
       <div className="trust-banner" style={{ marginBottom: "20px" }}>
@@ -121,7 +143,7 @@ export function IntegrationsPage() {
 
       {/* BhoomiRashi Hero Sync Panel */}
       <div className="panel" style={{ padding: "20px", marginBottom: "24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px", gap: "14px", flexWrap: "wrap" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
@@ -162,7 +184,7 @@ export function IntegrationsPage() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(4, 1fr)",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
                   gap: "10px",
                   marginTop: "12px",
                   paddingTop: "12px",
@@ -192,11 +214,22 @@ export function IntegrationsPage() {
       </div>
 
       {/* Systems Grid */}
+      {loading && systems.length === 0 && (
+        <div className="panel" style={{ marginBottom: "24px" }}>
+          <LoadingBlock label="Loading adapter health…" />
+        </div>
+      )}
+      {!loading && error && systems.length === 0 && (
+        <div className="panel" style={{ marginBottom: "24px" }}>
+          <ErrorBlock message={error} onRetry={() => refresh()} />
+        </div>
+      )}
+
       <div className="integration-grid" style={{ marginBottom: "24px" }}>
         {systems.map((s) => (
           <div className="panel integration-card" key={s.system}>
             <div className="integration-card-top">
-              <div className="external-logo">{s.system[0]}</div>
+              <div className="external-logo">{(s.system || "?")[0]}</div>
               <span className="connection mock">
                 <i />
                 {s.label}
@@ -211,8 +244,10 @@ export function IntegrationsPage() {
               <button
                 className="button button-secondary button-sm"
                 onClick={() => handleGenericSync(s.system)}
+                disabled={!!testingSystem}
               >
-                <Database size={13} /> Test Adapter
+                <Database size={13} className={testingSystem === s.system ? "spin-icon" : ""} />
+                {testingSystem === s.system ? "Testing…" : "Test Adapter"}
               </button>
             </div>
           </div>
@@ -253,7 +288,7 @@ export function IntegrationsPage() {
                     <td><span className="mono">{m.localId}</span></td>
                     <td><span style={{ fontSize: "11px", background: "#f1f5f9", padding: "2px 6px", borderRadius: "4px" }}>{m.entityType}</span></td>
                     <td><span style={{ color: "#16a34a", fontSize: "11px", fontWeight: 700 }}>✓ {m.syncStatus}</span></td>
-                    <td><small>{new Date(m.lastSyncedAt).toLocaleString()}</small></td>
+                    <td><small>{m.lastSyncedAt ? new Date(m.lastSyncedAt).toLocaleString() : "—"}</small></td>
                   </tr>
                 ))
               )}
