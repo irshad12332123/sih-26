@@ -18,7 +18,6 @@ export type SessionUser = {
   officerCode?: string;
 };
 
-
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem("nlams_token");
   const response = await fetch(`${API}${path}`, {
@@ -33,7 +32,10 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!response.ok) throw new Error(body.error?.message || "Request failed");
 
   // If this was a state-mutating request, emit global change event
-  if (init.method && ["POST", "PATCH", "PUT", "DELETE"].includes(init.method.toUpperCase())) {
+  if (
+    init.method &&
+    ["POST", "PATCH", "PUT", "DELETE"].includes(init.method.toUpperCase())
+  ) {
     emitDataChanged();
   }
 
@@ -45,10 +47,13 @@ export function emitDataChanged() {
 }
 
 export async function login(email: string, password: string) {
-  const result = await api<{ token: string; user: SessionUser }>("/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ email, password }),
-  });
+  const result = await api<{ token: string; user: SessionUser }>(
+    "/auth/login",
+    {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    },
+  );
   localStorage.setItem("nlams_token", result.token);
   localStorage.setItem("nlams_user", JSON.stringify(result.user));
   emitDataChanged();
