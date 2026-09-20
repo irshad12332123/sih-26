@@ -13,6 +13,7 @@ import { ReportsPage } from "./pages/ReportsPage";
 import { AuditPage } from "./pages/AuditPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { MasterDataPage } from "./pages/MasterDataPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 
 export default function App() {
   return (
@@ -34,6 +35,8 @@ export default function App() {
         <Route path="users" element={<MasterDataPage />} />
         <Route path="audit" element={<AuditPage />} />
         <Route path="integrations" element={<IntegrationsPage />} />
+        {/* Catch-all: the SPA rewrite routes unknown paths here. */}
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
   );

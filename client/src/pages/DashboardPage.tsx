@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   Activity,
@@ -22,7 +22,8 @@ import {
   Users,
 } from "lucide-react";
 import { api, currentUser } from "../api";
-import { StatusBadge, ProgressBar } from "../components/common";
+import { StatusBadge } from "../components/common";
+import { Alert, ErrorBlock, LoadingBlock } from "../components/ui";
 
 type Summary = {
   totalProjects: number;
@@ -63,38 +64,82 @@ type Project = {
   isNative?: boolean;
 };
 
+const number = (value: unknown) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+const inr = (value: unknown) => `₹${number(value).toLocaleString("en-IN")}`;
+
+/** Role-specific call-to-action strip shown above the KPI row. */
+function RoleBanner({
+  tone,
+  title,
+  body,
+  to,
+  cta,
+  icon,
+}: {
+  tone: { bg: string; border: string; title: string; body: string };
+  title: string;
+  body: string;
+  to: string;
+  cta: string;
+  icon: ReactNode;
+}) {
+  return (
+    <div
+      className="role-banner"
+      style={{ background: tone.bg, borderColor: tone.border }}
+    >
+      <div className="role-banner-copy">
+        <strong style={{ color: tone.title }}>{title}</strong>
+        <p style={{ color: tone.body }}>{body}</p>
+      </div>
+      <Link to={to} className="button button-primary button-sm">
+        {icon} {cta}
+      </Link>
+    </div>
+  );
+}
+
 export function DashboardPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const user = currentUser();
 
-  const refreshData = () => {
-    Promise.all([
-      api<Summary>("/dashboard/summary"),
-      api<Project[]>("/projects"),
-    ])
-      .then(([s, p]) => {
-        setSummary(s);
-        setProjects(p);
-      })
-      .catch((err) => {
-        console.warn("Could not fetch dashboard summary:", err?.message || err);
-      });
-  };
+  const refreshData = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
+    try {
+      const [s, p] = await Promise.all([
+        api<Summary>("/dashboard/summary"),
+        api<Project[]>("/projects"),
+      ]);
+      setSummary(s);
+      setProjects(p || []);
+      setError("");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not load the national overview.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     refreshData();
-    window.addEventListener("nlams:data-changed", refreshData);
-    return () => window.removeEventListener("nlams:data-changed", refreshData);
-  }, []);
+    // Background refreshes must not flash the skeleton over live content.
+    const handleChange = () => refreshData({ silent: true });
+    window.addEventListener("nlams:data-changed", handleChange);
+    return () => window.removeEventListener("nlams:data-changed", handleChange);
+  }, [refreshData]);
 
   const stats = summary
-    ? [
-        ["Total Projects", summary.totalProjects, BriefcaseBusiness],
-        ["Acquisition Cases", summary.totalCases, FileCheck2],
-        ["Candidate Parcels", summary.totalParcels, MapPin],
-        ["Cases at Risk", summary.atRisk, AlertTriangle],
-      ] as const
+    ? ([
+        ["Total Projects", number(summary.totalProjects), BriefcaseBusiness],
+        ["Acquisition Cases", number(summary.totalCases), FileCheck2],
+        ["Candidate Parcels", number(summary.totalParcels), MapPin],
+        ["Cases at Risk", number(summary.atRisk), AlertTriangle],
+      ] as const)
     : [];
 
   const role = user?.role || "NATIONAL_ADMIN";
@@ -139,87 +184,69 @@ export function DashboardPage() {
 
       {/* Role-Specific Action Banners */}
       {role === "PROJECT_OFFICER" && (
-        <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "14px 18px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <strong style={{ color: "#166534", fontSize: "14px" }}>Project Authority Workspace Active (Side B Demo)</strong>
-            <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#15803d" }}>
-              Ready to create a native Haryana Infrastructure Project, associate demo cadastral parcels from Ambala, and submit for automatic jurisdiction routing.
-            </p>
-          </div>
-          <Link to="/projects" className="button button-primary button-sm">
-            <Plus size={14} /> Create & Submit Project
-          </Link>
-        </div>
+        <RoleBanner
+          tone={{ bg: "#f0fdf4", border: "#bbf7d0", title: "#166534", body: "#15803d" }}
+          title="Project Authority Workspace Active (Side B Demo)"
+          body="Ready to create a native Haryana Infrastructure Project, associate demo cadastral parcels from Ambala, and submit for automatic jurisdiction routing."
+          to="/projects"
+          cta="Create & Submit Project"
+          icon={<Plus size={14} />}
+        />
       )}
 
       {role === "FIELD_OFFICER" && (
-        <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "14px 18px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <strong style={{ color: "#1e40af", fontSize: "14px" }}>Patwari / Field Survey Officer Workspace (Ambala)</strong>
-            <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#3b82f6" }}>
-              Ground inspections assigned in Demo Kalan / Ambala Tehsil. Physical checklist and geo-tagged photographic evidence required.
-            </p>
-          </div>
-          <Link to="/field-tasks" className="button button-primary button-sm">
-            <ClipboardCheck size={14} /> Open My Field Tasks
-          </Link>
-        </div>
+        <RoleBanner
+          tone={{ bg: "#eff6ff", border: "#bfdbfe", title: "#1e40af", body: "#3b82f6" }}
+          title="Patwari / Field Survey Officer Workspace (Ambala)"
+          body="Ground inspections assigned in Demo Kalan / Ambala Tehsil. Physical checklist and geo-tagged photographic evidence required."
+          to="/field-tasks"
+          cta="Open My Field Tasks"
+          icon={<ClipboardCheck size={14} />}
+        />
       )}
 
       {role === "REVIEWER" && (
-        <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "14px 18px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <strong style={{ color: "#1e40af", fontSize: "14px" }}>Revenue Scrutiny Officer Workspace (Ambala)</strong>
-            <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#3b82f6" }}>
-              Field verification dossiers submitted by Patwaris awaiting your scrutiny, review note, and stage advancement.
-            </p>
-          </div>
-          <Link to="/review-queue" className="button button-primary button-sm">
-            <UserCheck size={14} /> Open Review Queue
-          </Link>
-        </div>
+        <RoleBanner
+          tone={{ bg: "#eff6ff", border: "#bfdbfe", title: "#1e40af", body: "#3b82f6" }}
+          title="Revenue Scrutiny Officer Workspace (Ambala)"
+          body="Field verification dossiers submitted by Patwaris awaiting your scrutiny, review note, and stage advancement."
+          to="/review-queue"
+          cta="Open Review Queue"
+          icon={<UserCheck size={14} />}
+        />
       )}
 
       {role === "DISTRICT_OFFICER" && (
-        <div style={{ background: "#fdf4ff", border: "1px solid #f5d0fe", borderRadius: "8px", padding: "14px 18px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <strong style={{ color: "#86198f", fontSize: "14px" }}>District Revenue Officer & CALA Ambala</strong>
-            <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#a21caf" }}>
-              Administrative review and preliminary notification approvals require mandatory signed notification documents.
-            </p>
-          </div>
-          <Link to="/cases" className="button button-primary button-sm">
-            <FileCheck2 size={14} /> View District Cases
-          </Link>
-        </div>
+        <RoleBanner
+          tone={{ bg: "#fdf4ff", border: "#f5d0fe", title: "#86198f", body: "#a21caf" }}
+          title="District Revenue Officer & CALA Ambala"
+          body="Administrative review and preliminary notification approvals require mandatory signed notification documents."
+          to="/cases"
+          cta="View District Cases"
+          icon={<FileCheck2 size={14} />}
+        />
       )}
 
       {(role === "COMPENSATION_OFFICER" || role === "COMPENSATION_REVIEWER") && (
-        <div style={{ background: "#fefce8", border: "1px solid #fef08a", borderRadius: "8px", padding: "14px 18px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <strong style={{ color: "#854d0e", fontSize: "14px" }}>Compensation & DBT Disbursement Cell (Ambala)</strong>
-            <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#a16207" }}>
-              Land valuation assessment, statutory award approval, and PFMS Direct Benefit Transfer reconciliation gateway.
-            </p>
-          </div>
-          <Link to="/compensation" className="button button-primary button-sm">
-            <CircleDollarSign size={14} /> Manage Compensation
-          </Link>
-        </div>
+        <RoleBanner
+          tone={{ bg: "#fefce8", border: "#fef08a", title: "#854d0e", body: "#a16207" }}
+          title="Compensation & DBT Disbursement Cell (Ambala)"
+          body="Land valuation assessment, statutory award approval, and PFMS Direct Benefit Transfer reconciliation gateway."
+          to="/compensation"
+          cta="Manage Compensation"
+          icon={<CircleDollarSign size={14} />}
+        />
       )}
 
       {(role === "RR_OFFICER" || role === "RR_REVIEWER") && (
-        <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: "8px", padding: "14px 18px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <strong style={{ color: "#065f46", fontSize: "14px" }}>Rehabilitation & Resettlement Directorate</strong>
-            <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#047857" }}>
-              Entitlement package determination, social impact assessments, and benefit delivery monitoring.
-            </p>
-          </div>
-          <Link to="/rr" className="button button-primary button-sm">
-            <Building2 size={14} /> Manage R&R Entitlements
-          </Link>
-        </div>
+        <RoleBanner
+          tone={{ bg: "#ecfdf5", border: "#a7f3d0", title: "#065f46", body: "#047857" }}
+          title="Rehabilitation & Resettlement Directorate"
+          body="Entitlement package determination, social impact assessments, and benefit delivery monitoring."
+          to="/rr"
+          cta="Manage R&R Entitlements"
+          icon={<Building2 size={14} />}
+        />
       )}
 
       {/* Trust & Architecture Banner (Side A vs Side B) */}
@@ -238,18 +265,24 @@ export function DashboardPage() {
         </Link>
       </div>
 
+      <Alert tone="error" message={error} onDismiss={() => setError("")} />
+
       {/* Top 4 KPI Cards */}
       <div className="stat-grid">
-        {stats.map(([label, value, Icon]) => (
-          <div className="stat-card" key={label}>
-            <div className="stat-icon blue">
-              <Icon size={19} />
-            </div>
-            <div className="stat-label">{label}</div>
-            <strong className="stat-value">{value}</strong>
-            <span className="stat-delta">Database-backed metric</span>
-          </div>
-        ))}
+        {loading && !summary
+          ? [0, 1, 2, 3].map((index) => (
+              <div className="stat-card skeleton skeleton-card" key={index} aria-hidden="true" />
+            ))
+          : stats.map(([label, value, Icon]) => (
+              <div className="stat-card" key={label}>
+                <div className="stat-icon blue">
+                  <Icon size={19} />
+                </div>
+                <div className="stat-label">{label}</div>
+                <strong className="stat-value">{value}</strong>
+                <span className="stat-delta">Database-backed metric</span>
+              </div>
+            ))}
       </div>
 
       {/* Multi-column Grid */}
@@ -263,7 +296,11 @@ export function DashboardPage() {
             </div>
           </div>
           <div className="attention-list">
-            {projects.length === 0 ? (
+            {loading && projects.length === 0 ? (
+              <LoadingBlock label="Loading monitored projects…" />
+            ) : error && projects.length === 0 ? (
+              <ErrorBlock message={error} onRetry={() => refreshData()} />
+            ) : projects.length === 0 ? (
               <div style={{ padding: "24px 16px", textAlign: "center", color: "#64748b" }}>
                 <p style={{ margin: "0 0 12px", fontSize: "13px" }}>No projects currently loaded in baseline state.</p>
                 <Link to="/integrations" className="button button-secondary button-sm">
@@ -304,13 +341,20 @@ export function DashboardPage() {
             </div>
           </div>
           <div className="pulse-list">
+            {!summary && loading && <LoadingBlock label="Loading lifecycle totals…" />}
+            {!summary && !loading && (
+              <div className="empty-state">Lifecycle totals are unavailable right now.</div>
+            )}
             {summary && [
-              ["Land Required", `${summary.landRequiredHa} ha`],
-              ["Land Acquired", `${summary.landAcquiredHa} ha`],
-              ["Compensation Assessed", `₹${summary.compensationAssessed.toLocaleString("en-IN")}`],
-              ["Compensation Disbursed (PFMS)", `₹${summary.compensationPaid.toLocaleString("en-IN")}`],
-              ["R&R Benefits Delivered", `${summary.benefitsDelivered} / ${summary.eligibleFamilies} families`],
-              ["Site Possession Completed", `${summary.possessionCompleted} parcels`],
+              ["Land Required", `${number(summary.landRequiredHa)} ha`],
+              ["Land Acquired", `${number(summary.landAcquiredHa)} ha`],
+              ["Compensation Assessed", inr(summary.compensationAssessed)],
+              ["Compensation Disbursed (PFMS)", inr(summary.compensationPaid)],
+              [
+                "R&R Benefits Delivered",
+                `${number(summary.benefitsDelivered)} / ${number(summary.eligibleFamilies)} families`,
+              ],
+              ["Site Possession Completed", `${number(summary.possessionCompleted)} parcels`],
             ].map(([label, value]) => (
               <div className="pulse-row" key={String(label)}>
                 <div className="pulse-icon">●</div>

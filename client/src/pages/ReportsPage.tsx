@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { api, csvDownload } from "../api";
 import { PageHeader } from "../components/common";
+import { Alert, ErrorBlock, LoadingBlock, TableLoadingRow } from "../components/ui";
 
 export function ReportsPage() {
   const [rows, setRows] = useState<any[]>([]);
@@ -21,8 +22,8 @@ export function ReportsPage() {
   const fetchReports = async () => {
     try {
       setLoading(true);
-      const data = await api<any[]>("/reports/summary");
-      setRows(data);
+      setRows((await api<any[]>("/reports/summary")) || []);
+      setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load summary analytics");
     } finally {
@@ -32,6 +33,9 @@ export function ReportsPage() {
 
   useEffect(() => {
     fetchReports();
+    const onChange = () => fetchReports();
+    window.addEventListener("nlams:data-changed", onChange);
+    return () => window.removeEventListener("nlams:data-changed", onChange);
   }, []);
 
   const totalCases = rows.reduce((s, r) => s + (r.cases || 0), 0);
@@ -47,7 +51,7 @@ export function ReportsPage() {
         description="Consolidated statutory milestone progress, financial compensation disbursement velocity, and R&R entitlement compliance."
       />
 
-      {error && <div className="login-note" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>{error}</div>}
+      <Alert tone="error" message={error} onDismiss={() => setError("")} />
 
       {/* KPI Cards */}
       <div className="stat-grid" style={{ marginBottom: "20px" }}>
@@ -79,7 +83,7 @@ export function ReportsPage() {
 
       {/* Progress Breakdown Visual */}
       <div className="panel" style={{ padding: "20px", marginBottom: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", gap: "12px", flexWrap: "wrap" }}>
           <div>
             <h3 style={{ margin: 0, fontSize: "15px", color: "#1e293b" }}>Project Milestone Completion</h3>
             <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#64748b" }}>
@@ -96,7 +100,11 @@ export function ReportsPage() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-          {rows.length === 0 ? (
+          {loading && rows.length === 0 ? (
+            <LoadingBlock label="Loading milestone analytics…" />
+          ) : error && rows.length === 0 ? (
+            <ErrorBlock message={error} onRetry={fetchReports} />
+          ) : rows.length === 0 ? (
             <div style={{ textAlign: "center", padding: "20px", color: "#64748b", fontSize: "12px" }}>
               No project milestone records in baseline state.
             </div>
@@ -110,7 +118,7 @@ export function ReportsPage() {
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <span style={{ fontSize: "11px", color: "#64748b" }}>
-                      {r.parcels} Parcels · Disbursed: ₹{(r.compensationPaid / 100000).toFixed(1)}L
+                      {r.parcels} Parcels · Disbursed: ₹{(Number(r.compensationPaid || 0) / 100000).toFixed(1)}L
                     </span>
                     <strong style={{ fontSize: "13px", color: r.progress >= 80 ? "#16a34a" : "#2563eb" }}>
                       {r.progress}%
@@ -156,7 +164,9 @@ export function ReportsPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
+              {loading && rows.length === 0 ? (
+                <TableLoadingRow colSpan={8} label="Loading project analytics…" />
+              ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={8} style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
                     No project analytics available in clean baseline state.
@@ -176,8 +186,8 @@ export function ReportsPage() {
                           {r.progress}%
                         </span>
                       </td>
-                      <td>₹{r.compensationAssessed.toLocaleString("en-IN")}</td>
-                      <td><strong style={{ color: "#16a34a" }}>₹{r.compensationPaid.toLocaleString("en-IN")}</strong></td>
+                      <td>₹{Number(r.compensationAssessed || 0).toLocaleString("en-IN")}</td>
+                      <td><strong style={{ color: "#16a34a" }}>₹{Number(r.compensationPaid || 0).toLocaleString("en-IN")}</strong></td>
                       <td>
                         <span style={{ fontSize: "11px", background: "#ecfdf5", color: "#065f46", padding: "2px 6px", borderRadius: "4px", fontWeight: 700 }}>
                           {dbtRate}%

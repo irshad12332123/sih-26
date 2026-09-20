@@ -20,16 +20,43 @@ export type SessionUser = {
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem("nlams_token");
-  const response = await fetch(`${API}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init.headers || {}),
-    },
-  });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error?.message || "Request failed");
+  let response: Response;
+  try {
+    response = await fetch(`${API}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init.headers || {}),
+      },
+    });
+  } catch {
+    throw new Error(
+      "Cannot reach the N-LAMS API. Check that the backend service is running and try again.",
+    );
+  }
+
+  // The API always answers with JSON, but a proxy error or a crash can return
+  // HTML/empty bodies — surface a readable message instead of a parse error.
+  let body: any = null;
+  const raw = await response.text();
+  if (raw) {
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      body = null;
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      body?.error?.message ||
+        (response.status === 401
+          ? "Your session has expired. Please sign in again."
+          : `Request failed (${response.status} ${response.statusText || "error"}).`),
+    );
+  }
+  if (body === null) throw new Error("The server returned an unreadable response.");
 
   // If this was a state-mutating request, emit global change event
   if (
@@ -100,19 +127,32 @@ export function logout() {
   emitDataChanged();
 }
 
+function csvCell(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const text =
+    typeof value === "object" ? JSON.stringify(value) : String(value);
+  // RFC 4180: wrap in quotes and double any embedded quote.
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
 export function csvDownload(rows: Record<string, unknown>[], fileName: string) {
   if (!rows || rows.length === 0) return;
-  const keys = Object.keys(rows[0] || {});
+  // Rows can have differing shapes — use the union of keys so nothing is lost.
+  const keys = Array.from(new Set(rows.flatMap((row) => Object.keys(row || {}))));
+  if (keys.length === 0) return;
   const csv = [
-    keys.join(","),
-    ...rows.map((row) =>
-      keys.map((key) => JSON.stringify(row[key] ?? "")).join(","),
-    ),
-  ].join("\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    keys.map(csvCell).join(","),
+    ...rows.map((row) => keys.map((key) => csvCell(row?.[key])).join(",")),
+  ].join("\r\n");
+  const url = URL.createObjectURL(
+    new Blob(["﻿", csv], { type: "text/csv;charset=utf-8;" }),
+  );
   const link = document.createElement("a");
   link.href = url;
   link.download = fileName;
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(link);
+  // Give the browser a tick to start the download before releasing the blob.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

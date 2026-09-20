@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { NavLink, Outlet, useLocation, useNavigate, Link } from "react-router-dom";
+import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
   Bell,
@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { api, currentUser, login, logout, getRoleDashboardPath } from "../api";
+import { ErrorBoundary } from "../components/ui";
 import "../notifications.css";
 
 type Notification = {
@@ -41,11 +42,35 @@ type Notification = {
   createdAt: string;
 };
 
+/** Every first-level route the portal actually serves. */
+export const KNOWN_ROUTE_BASES = [
+  "/",
+  "/projects",
+  "/cases",
+  "/field-tasks",
+  "/review-queue",
+  "/map",
+  "/documents",
+  "/compensation",
+  "/rr",
+  "/reports",
+  "/users",
+  "/audit",
+  "/integrations",
+];
+
+export function routeBase(pathname: string): string {
+  return "/" + (pathname.split("/")[1] || "");
+}
+
 export function isRouteAllowedForRole(pathname: string, role?: string): boolean {
   if (!role) return false;
   if (role === "NATIONAL_ADMIN" || role === "SUPER_ADMIN") return true;
 
-  const base = "/" + (pathname.split("/")[1] || "");
+  const base = routeBase(pathname);
+  // Unknown paths fall through to the catch-all 404 screen rather than being
+  // silently bounced to the role dashboard.
+  if (!KNOWN_ROUTE_BASES.includes(base)) return true;
 
   switch (role) {
     case "FIELD_OFFICER":
@@ -91,26 +116,62 @@ export function PortalLayout() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const user = currentUser();
+  // currentUser() re-parses localStorage on every call, so hold it in state to
+  // keep a stable identity for the effects below — and refresh it whenever a
+  // sign-in happens (the demo role switcher swaps personas in place).
+  const [user, setUser] = useState(() => currentUser());
 
   useEffect(() => {
-    if (!user) {
-      navigate("/login");
-      return;
-    }
-    // Route guard: if current route is not allowed for role, direct to their dashboard
+    const syncUser = () => {
+      const next = currentUser();
+      // Only swap identity when the signed-in officer actually changed —
+      // "nlams:data-changed" fires on every mutating request.
+      setUser((previous) =>
+        previous?.id === next?.id && previous?.role === next?.role ? previous : next,
+      );
+    };
+    window.addEventListener("nlams:data-changed", syncUser);
+    window.addEventListener("storage", syncUser);
+    return () => {
+      window.removeEventListener("nlams:data-changed", syncUser);
+      window.removeEventListener("storage", syncUser);
+    };
+  }, []);
+
+  // Close the mobile drawer whenever the route changes.
+  useEffect(() => {
+    setOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!user) return;
     if (!isRouteAllowedForRole(location.pathname, user.role)) {
       navigate(getRoleDashboardPath(user.role), { replace: true });
     }
   }, [navigate, user, location.pathname]);
 
+  // Redirect during render rather than in an effect, so the portal chrome is
+  // never briefly shown to a signed-out visitor.
+  if (!user) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
   return (
     <div className="app-shell">
       <Sidebar open={open} onClose={() => setOpen(false)} user={user} />
+      {open && (
+        <div
+          className="sidebar-backdrop"
+          role="presentation"
+          onClick={() => setOpen(false)}
+        />
+      )}
       <div className="main-shell">
         <Topbar onMenu={() => setOpen(true)} user={user} />
         <main className="page-content">
-          <Outlet />
+          <ErrorBoundary key={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>
@@ -248,8 +309,8 @@ function Sidebar({
             >
               <Icon size={18} />
               <span>{label}</span>
-              {label.includes("Tasks") && <b style={{ background: "#dc2626", color: "#fff" }}>Active</b>}
-              {label.includes("Review") && <b style={{ background: "#2563eb", color: "#fff" }}>Active</b>}
+              {to === "/field-tasks" && <b style={{ background: "#dc2626", color: "#fff" }}>Active</b>}
+              {to === "/review-queue" && <b style={{ background: "#2563eb", color: "#fff" }}>Active</b>}
             </NavLink>
           ))}
         </div>
@@ -290,6 +351,9 @@ function Topbar({
   const [showRoleSwitcher, setShowRoleSwitcher] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [resetError, setResetError] = useState("");
+  const [switchingTo, setSwitchingTo] = useState("");
   const popoverRef = useRef<HTMLDivElement>(null);
   const roleSwitcherRef = useRef<HTMLDivElement>(null);
 
@@ -357,13 +421,19 @@ function Topbar({
   };
 
   const handleRoleSwitch = async (email: string, pass: string) => {
+    if (switchingTo) return;
     try {
+      setSwitchingTo(email);
       const loggedUser = await login(email, pass);
       setShowRoleSwitcher(false);
-      const targetDashboard = getRoleDashboardPath(loggedUser.role);
-      navigate(targetDashboard);
-    } catch {
-      // ignore
+      navigate(getRoleDashboardPath(loggedUser.role), { replace: true });
+    } catch (err) {
+      setResetError(
+        err instanceof Error ? err.message : "Could not switch demo persona.",
+      );
+      window.setTimeout(() => setResetError(""), 5000);
+    } finally {
+      setSwitchingTo("");
     }
   };
 
@@ -373,32 +443,48 @@ function Topbar({
     }
     try {
       setResetting(true);
+      setResetError("");
       await api("/demo/reset", { method: "POST" });
-      setResetMessage("Demo state reset to clean baseline!");
-      setTimeout(() => {
-        setResetMessage("");
-        window.location.href = "/";
-      }, 800);
+      setResetMessage("Demo state reset");
+      navigate(getRoleDashboardPath(user?.role));
+      window.setTimeout(() => setResetMessage(""), 2500);
     } catch (err) {
-      alert("Reset failed");
+      setResetError(
+        err instanceof Error ? err.message : "Demo reset failed. Please retry.",
+      );
+      window.setTimeout(() => setResetError(""), 5000);
     } finally {
       setResetting(false);
     }
   };
 
+  const routeTitles: Record<string, string> = {
+    "/": "Overview",
+    "/projects": "Projects Portfolio",
+    "/cases": "Acquisition Cases",
+    "/field-tasks": "My Field Tasks",
+    "/review-queue": "Review Queue",
+    "/map": "GIS Map",
+    "/documents": "Document Library",
+    "/compensation": "Compensation",
+    "/rr": "Rehabilitation & Resettlement",
+    "/reports": "Reports & Analytics",
+    "/users": "Master Authorities Registry",
+    "/audit": "Audit Logs",
+    "/integrations": "Integration Center",
+  };
   const title = location.pathname.startsWith("/projects/")
     ? "Project Workspace"
     : location.pathname.startsWith("/cases/")
       ? "Acquisition Case"
-      : location.pathname === "/"
-        ? "Overview"
-        : location.pathname === "/field-tasks"
-          ? "My Field Tasks"
-          : location.pathname === "/review-queue"
-            ? "Review Queue"
-            : location.pathname === "/users"
-              ? "Master Authorities Registry"
-              : location.pathname.slice(1).replace("-", " ");
+      : routeTitles[location.pathname] ||
+        location.pathname
+          .slice(1)
+          .split("-")
+          .filter(Boolean)
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ") ||
+        "Overview";
 
   return (
     <header className="topbar">
@@ -413,28 +499,36 @@ function Topbar({
       <div className="top-actions">
         {/* Reset Demo Button */}
         <button
-          className="button button-secondary button-sm"
+          className="button button-secondary button-sm reset-demo-button"
           onClick={handleResetDemo}
           disabled={resetting}
-          title="Reset demonstration state for clean video recording"
-          style={{ display: "flex", alignItems: "center", gap: "6px", color: "#dc2626", borderColor: "#fecaca" }}
+          title={resetError || "Reset demonstration state for clean video recording"}
+          style={{ color: resetError ? "#991b1b" : "#dc2626", borderColor: "#fecaca" }}
         >
           <RotateCcw size={13} className={resetting ? "spin-icon" : ""} />
-          {resetting ? "Resetting…" : resetMessage || "Reset Demo"}
+          <span className="reset-demo-label">
+            {resetting ? "Resetting…" : resetError ? "Reset failed" : resetMessage || "Reset Demo"}
+          </span>
         </button>
 
         {/* Global Search */}
-        <div className="global-search">
-          <span>⌕</span>
+        <form
+          className="global-search"
+          role="search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const term = searchTerm.trim();
+            navigate(term ? `/cases?q=${encodeURIComponent(term)}` : "/cases");
+          }}
+        >
+          <span aria-hidden="true">⌕</span>
           <input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
             placeholder="Search parcel, survey, case…"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && e.currentTarget.value) {
-                navigate(`/cases`);
-              }
-            }}
+            aria-label="Search cases by parcel, survey number or case ID"
           />
-        </div>
+        </form>
 
         {/* Notification Bell */}
         <div style={{ position: "relative" }} ref={popoverRef}>
@@ -527,6 +621,7 @@ function Topbar({
                 top: "45px",
                 right: "0",
                 width: "320px",
+                maxWidth: "calc(100vw - 24px)",
                 background: "#fff",
                 border: "1px solid #dbe3ee",
                 borderRadius: "10px",
@@ -534,6 +629,7 @@ function Topbar({
                 zIndex: 90,
                 padding: "8px 0",
               }}
+              role="menu"
             >
               <div style={{ padding: "6px 14px", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #f1f5f9" }}>
                 SWITCH DEMO ROLE PERSPECTIVE (SYNTHETIC)
@@ -543,6 +639,8 @@ function Topbar({
                   <button
                     key={opt.email}
                     onClick={() => handleRoleSwitch(opt.email, opt.pass)}
+                    disabled={!!switchingTo}
+                    role="menuitem"
                     style={{
                       display: "block",
                       width: "100%",
@@ -558,7 +656,11 @@ function Topbar({
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span>{opt.label}</span>
-                      {user?.email === opt.email && <CheckCircle2 size={13} color="#1d4ed8" />}
+                      {switchingTo === opt.email ? (
+                        <RefreshCw size={13} className="spin-icon" color="#1d4ed8" />
+                      ) : (
+                        user?.email === opt.email && <CheckCircle2 size={13} color="#1d4ed8" />
+                      )}
                     </div>
                     <span style={{ display: "block", fontSize: "10px", color: "#64748b", fontWeight: 400, marginTop: "1px" }}>
                       {opt.desc}

@@ -376,6 +376,263 @@ async function runTests() {
       `${reportsSummary.data.length} projects analyzed`,
     );
 
+    // ============================================================
+    // PART 3: REGRESSION GUARDS
+    // Each of these reproduced a real data-integrity or wiring defect.
+    // ============================================================
+    console.log("\n--- [PART 3: REGRESSION GUARDS] ---");
+
+    // R1. Case detail must carry the activity timeline the case workspace renders.
+    const caseList = await request("/cases", { headers: { Authorization: `Bearer ${natToken}` } });
+    const nativeCase = caseList.data.find((c: any) => c.projectId === nativeProj.id);
+    const caseDetail = await request(`/cases/${nativeCase.id}`, {
+      headers: { Authorization: `Bearer ${natToken}` },
+    });
+    assert(
+      caseDetail.ok && Array.isArray(caseDetail.data.activity) && caseDetail.data.activity.length > 0,
+      "33. Case detail payload includes the chronological activity timeline",
+      `${caseDetail.data?.activity?.length ?? 0} events`,
+    );
+
+    // R2. The timeline endpoint must accept the canonical case reference too.
+    const timelineByRef = await request(`/cases/${encodeURIComponent(nativeCase.caseId)}/timeline`, {
+      headers: { Authorization: `Bearer ${natToken}` },
+    });
+    assert(
+      timelineByRef.ok && Array.isArray(timelineByRef.data) && timelineByRef.data.length > 0,
+      "34. GET /cases/:id/timeline resolves a case reference as well as a record id",
+    );
+    const timelineMissing = await request("/cases/does-not-exist/timeline", {
+      headers: { Authorization: `Bearer ${natToken}` },
+    });
+    assert(timelineMissing.status === 404, "35. Unknown case timeline returns 404 rather than an empty list");
+
+    // R3. Case references must stay unique across projects.
+    const secondProject = await request("/projects", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${projToken}` },
+      body: JSON.stringify({
+        name: "Second Native Corridor (uniqueness probe)",
+        projectId: "HR-INFRA-2026-002",
+        department: "Irrigation & Water Resources",
+        type: "State Infrastructure",
+        state: "Haryana",
+        district: "Ambala",
+        selectedParcelIds: ["pcl-hr-amb-004"],
+        submitImmediately: true,
+      }),
+    });
+    assert(secondProject.ok, "36. Second native project created for the uniqueness probe");
+    const allCases = await request("/cases", { headers: { Authorization: `Bearer ${natToken}` } });
+    const references = allCases.data.map((c: any) => c.caseId);
+    const recordIds = allCases.data.map((c: any) => c.id);
+    assert(
+      new Set(references).size === references.length,
+      "37. Case references are unique across projects",
+      `${references.length} cases, ${new Set(references).size} distinct references`,
+    );
+    assert(
+      new Set(recordIds).size === recordIds.length,
+      "38. Case record ids are unique across projects",
+    );
+
+    // R4. Duplicate project codes must be rejected.
+    const duplicateCode = await request("/projects", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${projToken}` },
+      body: JSON.stringify({
+        name: "Duplicate Code Probe",
+        projectId: "HR-INFRA-2026-001",
+        department: "Irrigation & Water Resources",
+        type: "State Infrastructure",
+        state: "Haryana",
+        district: "Ambala",
+        selectedParcelIds: ["pcl-hr-amb-005"],
+      }),
+    });
+    assert(
+      duplicateCode.status === 409 && duplicateCode.error?.code === "DUPLICATE_PROJECT_CODE",
+      "39. Duplicate project codes are rejected with 409",
+      duplicateCode.error?.code,
+    );
+
+    // R5. Re-submitting a project must not duplicate its cases.
+    const casesBeforeResubmit = (await request("/cases", { headers: { Authorization: `Bearer ${natToken}` } })).data.length;
+    const reSubmit = await request(`/projects/${nativeProj.id}/submit`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${projToken}` },
+    });
+    const casesAfterResubmit = (await request("/cases", { headers: { Authorization: `Bearer ${natToken}` } })).data.length;
+    assert(
+      reSubmit.status === 409 && casesBeforeResubmit === casesAfterResubmit,
+      "40. Re-submitting an already-submitted project is rejected and creates no duplicate cases",
+      `${casesBeforeResubmit} → ${casesAfterResubmit} cases`,
+    );
+
+    // R6. A completed task must not be approvable a second time.
+    const reApprove = await request(`/tasks/${adminTask.id}/approve`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${distToken}` },
+      body: JSON.stringify({ remarks: "duplicate approval probe" }),
+    });
+    assert(
+      reApprove.status === 409 && reApprove.error?.code === "TASK_ALREADY_COMPLETED",
+      "41. Re-approving a completed task is rejected with 409",
+      reApprove.error?.code,
+    );
+
+    // R7. Field verification must not be submittable twice for one task.
+    const reVerify = await request(`/tasks/${fieldTask.id}/field-verification`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${fieldAmbalaToken}` },
+      body: JSON.stringify({ remarks: "duplicate verification probe" }),
+    });
+    assert(
+      reVerify.status === 409,
+      "42. Duplicate field-verification submission is rejected with 409",
+      reVerify.error?.code,
+    );
+
+    // R8. A disbursed award must not be re-approved or re-synced.
+    const reApproveAward = await request(`/compensation/${targetComp.id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${compReviewToken}` },
+      body: JSON.stringify({ status: "APPROVED", approvedAmount: 999999 }),
+    });
+    assert(
+      reApproveAward.status === 409 && reApproveAward.error?.code === "ALREADY_DISBURSED",
+      "43. Re-approving an already disbursed compensation award is rejected",
+      reApproveAward.error?.code,
+    );
+    const reSyncPayment = await request(`/compensation/${targetComp.id}/sync`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${compReviewToken}` },
+    });
+    assert(reSyncPayment.status === 409, "44. Re-running a PFMS disbursement for a paid award is rejected");
+
+    // R9. Negative / zero assessments must be rejected.
+    const pendingComp = (await request("/compensation", { headers: { Authorization: `Bearer ${compReviewToken}` } })).data
+      .find((c: any) => c.status !== "PAID");
+    if (pendingComp) {
+      const badAssessment = await request(`/compensation/${pendingComp.id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${compReviewToken}` },
+        body: JSON.stringify({ assessedAmount: -5 }),
+      });
+      assert(badAssessment.status === 400, "45. A non-positive assessed amount is rejected with 400");
+    } else {
+      assert(false, "45. A non-positive assessed amount is rejected with 400", "no pending compensation record found");
+    }
+
+    // R10. R&R delivery must not run twice (it raises a possession task).
+    const reDeliver = await request(`/rr/${targetRR.id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${rrToken}` },
+      body: JSON.stringify({ status: "COMPLETED", benefitsDelivered: targetRR.eligibleFamilies }),
+    });
+    assert(
+      reDeliver.status === 409 && reDeliver.error?.code === "ALREADY_COMPLETED",
+      "46. Re-delivering an already completed R&R package is rejected",
+      reDeliver.error?.code,
+    );
+
+    // R11. Possession must not be re-recorded.
+    const rePossession = await request(`/possession/${targetPoss.id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${possToken}` },
+      body: JSON.stringify({ remarks: "duplicate possession probe" }),
+    });
+    assert(rePossession.status === 409, "47. Re-recording a completed possession is rejected");
+
+    // R12. A completed case cannot be advanced further.
+    const completedCase = (await request("/cases", { headers: { Authorization: `Bearer ${natToken}` } })).data
+      .find((c: any) => c.status === "Completed");
+    if (completedCase) {
+      const advanceCompleted = await request(`/cases/${completedCase.id}/advance`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${natToken}` },
+        body: JSON.stringify({ remarks: "advance completed probe" }),
+      });
+      assert(
+        advanceCompleted.status === 409 && advanceCompleted.error?.code === "CASE_COMPLETED",
+        "48. Advancing an already completed case is rejected",
+        advanceCompleted.error?.code,
+      );
+    } else {
+      assert(false, "48. Advancing an already completed case is rejected", "no completed case found");
+    }
+
+    // R13. Parcels already bound to a project cannot be re-associated.
+    const reusedParcel = await request("/projects", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${projToken}` },
+      body: JSON.stringify({
+        name: "Parcel Reuse Probe",
+        projectId: "HR-INFRA-2026-099",
+        department: "Irrigation & Water Resources",
+        type: "State Infrastructure",
+        state: "Haryana",
+        district: "Ambala",
+        selectedParcelIds: ["pcl-hr-amb-001"],
+      }),
+    });
+    assert(
+      reusedParcel.status === 409 && reusedParcel.error?.code === "PARCEL_ALREADY_ASSIGNED",
+      "49. A cadastral parcel cannot be associated with two projects",
+      reusedParcel.error?.code,
+    );
+
+    // R13b. Unknown parcel ids must be rejected rather than silently dropped.
+    const unknownParcel = await request("/projects", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${projToken}` },
+      body: JSON.stringify({
+        name: "Unknown Parcel Probe",
+        projectId: "HR-INFRA-2026-098",
+        department: "Irrigation & Water Resources",
+        type: "State Infrastructure",
+        state: "Haryana",
+        district: "Ambala",
+        selectedParcelIds: ["pcl-does-not-exist"],
+      }),
+    });
+    assert(
+      unknownParcel.status === 400 && unknownParcel.error?.code === "UNKNOWN_PARCEL",
+      "49b. Unknown cadastral parcel ids are rejected with 400",
+      unknownParcel.error?.code,
+    );
+
+    // R14. The dashboard summary must expose every field the UI reads.
+    const summary = await request("/dashboard/summary", { headers: { Authorization: `Bearer ${natToken}` } });
+    const requiredSummaryKeys = [
+      "totalProjects", "activeProjects", "totalCases", "totalParcels", "candidateParcels",
+      "acquiredParcels", "landRequiredHa", "landAcquiredHa", "atRisk", "pendingApprovals",
+      "pendingFieldVerifications", "pendingReviews", "compensationAssessed", "compensationApproved",
+      "compensationPaid", "compensationPending", "affectedFamilies", "eligibleFamilies",
+      "benefitsDelivered", "rrPending", "possessionCompleted",
+    ];
+    const missingKeys = requiredSummaryKeys.filter((k) => summary.data?.[k] === undefined);
+    assert(
+      summary.ok && missingKeys.length === 0,
+      "50. Dashboard summary exposes every metric the overview renders",
+      missingKeys.length ? `missing: ${missingKeys.join(", ")}` : `${requiredSummaryKeys.length} metrics present`,
+    );
+
+    // R15. Possession completion must be reflected in the native project's land
+    // figures, while externally-owned figures stay exactly as synchronised.
+    const projectsAfter = await request("/projects", { headers: { Authorization: `Bearer ${natToken}` } });
+    const extProject = projectsAfter.data.find((p: any) => p.externalProjectId === "BR-NH-2026-0042");
+    assert(
+      Number(summary.data.landAcquiredHa) > 0,
+      "51. Project land-acquired figures track completed possessions",
+      `landAcquiredHa: ${summary.data.landAcquiredHa}`,
+    );
+    assert(
+      Number(extProject?.landRequiredHa) === 312.4 && Number(extProject?.landAcquiredHa) === 168.8,
+      "52. Externally synchronised land figures are never overwritten by N-LAMS",
+      `required=${extProject?.landRequiredHa}, acquired=${extProject?.landAcquiredHa}`,
+    );
+
   } catch (err) {
     console.error("Test execution error:", err);
     failed++;
