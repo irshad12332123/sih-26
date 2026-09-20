@@ -12,12 +12,13 @@ export const app = express();
 app.use(helmet());
 
 const allowedOrigins = [
+  env.corsOrigin,
   env.clientUrl,
   'http://localhost:5173',
   'http://localhost:5174',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
-];
+].filter(Boolean);
 
 app.use(
   cors({
@@ -43,6 +44,14 @@ app.use((req, _res, next) => {
     }),
   );
   next();
+});
+
+// Root health check endpoint for monitoring/deployment platforms
+app.get('/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'nlams-api',
+  });
 });
 
 app.use('/api', validateSession, api);

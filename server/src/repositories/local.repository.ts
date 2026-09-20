@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Role } from "../types.js";
+import { env } from "../config/env.js";
 
 export type DemoRole = Role;
 
@@ -1656,7 +1657,15 @@ class LocalStateStore {
   private state: State | null = null;
 
   constructor() {
-    this.filePath = resolve(process.cwd(), ".data/nlams.json");
+    const rawPath = env.dataFile || process.env.NLAMS_DATA_FILE || ".data/nlams.json";
+    let targetPath = resolve(process.cwd(), rawPath);
+    if (!existsSync(targetPath)) {
+      const nestedPath = resolve(process.cwd(), "server", rawPath);
+      if (existsSync(nestedPath)) {
+        targetPath = nestedPath;
+      }
+    }
+    this.filePath = targetPath;
     const dir = dirname(this.filePath);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
