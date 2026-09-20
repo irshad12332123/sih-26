@@ -91,7 +91,7 @@ export function requireRole(...allowedRoles: DemoRole[]) {
 // 1. Health & Demonstration Reset
 // ----------------------------------------------------------------------------
 
-api.get("/health", (_req, res) => {
+api.get("/health", (_req: Request, res: Response) => {
   res.json({
     data: {
       service: "n-lams-api",
@@ -104,7 +104,7 @@ api.get("/health", (_req, res) => {
   });
 });
 
-api.post("/demo/reset", (_req, res) => {
+api.post("/demo/reset", (_req: Request, res: Response) => {
   const fresh = resetState();
   res.json({
     data: {
@@ -123,7 +123,7 @@ api.post("/demo/reset", (_req, res) => {
 // 2. Authentication & Profile
 // ----------------------------------------------------------------------------
 
-api.post("/auth/login", (req, res) => {
+api.post("/auth/login", (req: Request, res: Response) => {
   const input = z.object({ email: z.string().min(1), password: z.string().min(1) }).parse(req.body);
   const state = loadState();
   const normalizedEmail = input.email.trim().toLowerCase();
@@ -164,7 +164,7 @@ api.post("/auth/login", (req, res) => {
   });
 });
 
-api.get("/me", (req, res) => {
+api.get("/me", (req: Request, res: Response) => {
   const user = getAuthUser(req);
   res.json({
     data: user
@@ -193,17 +193,17 @@ api.get("/me", (req, res) => {
 // 3. Master Authority & Jurisdictions Registry
 // ----------------------------------------------------------------------------
 
-api.get("/master/departments", (_req, res) => {
+api.get("/master/departments", (_req: Request, res: Response) => {
   const state = loadState();
   res.json({ data: state.masterDepartments });
 });
 
-api.get("/master/organizations", (_req, res) => {
+api.get("/master/organizations", (_req: Request, res: Response) => {
   const state = loadState();
   res.json({ data: state.masterOrganizations });
 });
 
-api.get("/master/jurisdictions", (_req, res) => {
+api.get("/master/jurisdictions", (_req: Request, res: Response) => {
   const state = loadState();
   res.json({
     data: {
@@ -215,7 +215,7 @@ api.get("/master/jurisdictions", (_req, res) => {
   });
 });
 
-api.get("/master/officers", (_req, res) => {
+api.get("/master/officers", (_req: Request, res: Response) => {
   const state = loadState();
   res.json({
     data: state.users.map((u) => ({
@@ -241,7 +241,7 @@ api.get("/master/officers", (_req, res) => {
   });
 });
 
-api.get("/master/parcels", (_req, res) => {
+api.get("/master/parcels", (_req: Request, res: Response) => {
   const state = loadState();
   res.json({ data: state.masterParcelsPool });
 });
@@ -250,7 +250,7 @@ api.get("/master/parcels", (_req, res) => {
 // 4. National Dashboard Aggregates
 // ----------------------------------------------------------------------------
 
-api.get("/dashboard/summary", (_req, res) => {
+api.get("/dashboard/summary", (_req: Request, res: Response) => {
   const state = loadState();
   const projects = state.projects || [];
   const cases = state.cases || [];
@@ -292,12 +292,12 @@ api.get("/dashboard/summary", (_req, res) => {
 // 5. Projects API (Native Creation & External Unified View)
 // ----------------------------------------------------------------------------
 
-api.get("/projects", (_req, res) => {
+api.get("/projects", (_req: Request, res: Response) => {
   const state = loadState();
   res.json({ data: state.projects });
 });
 
-api.get("/projects/:id", (req, res) => {
+api.get("/projects/:id", (req: Request, res: Response) => {
   const state = loadState();
   const project = state.projects.find((p) => p.id === req.params.id || p.projectId === req.params.id);
   if (!project) {
@@ -321,7 +321,7 @@ api.get("/projects/:id", (req, res) => {
 api.post(
   "/projects",
   requireRole("PROJECT_OFFICER", "PROJECT_AUTHORITY", "NATIONAL_ADMIN", "SUPER_ADMIN"),
-  (req, res) => {
+  (req: Request, res: Response) => {
     const input = z
       .object({
         projectId: z.string().optional(),
@@ -417,7 +417,7 @@ api.post(
 api.post(
   "/projects/:id/submit",
   requireRole("PROJECT_OFFICER", "PROJECT_AUTHORITY", "NATIONAL_ADMIN", "SUPER_ADMIN"),
-  (req, res) => {
+  (req: Request, res: Response) => {
     const state = loadState();
     const user = (req as any).user;
     const project = state.projects.find((p) => p.id === req.params.id || p.projectId === req.params.id);
@@ -565,7 +565,7 @@ function executeProjectSubmission(state: ReturnType<typeof loadState>, project: 
 // 6. Cases API
 // ----------------------------------------------------------------------------
 
-api.get("/cases", (req, res) => {
+api.get("/cases", (req: Request, res: Response) => {
   const state = loadState();
   const user = getAuthUser(req);
   const cases = state.cases || [];
@@ -661,7 +661,7 @@ api.get("/cases", (req, res) => {
   res.json({ data: hydrated });
 });
 
-api.get("/cases/:id", (req, res) => {
+api.get("/cases/:id", (req: Request, res: Response) => {
   const state = loadState();
   const c = state.cases.find((item) => item.id === req.params.id || item.caseId === req.params.id);
   if (!c) {
@@ -708,7 +708,7 @@ api.get("/cases/:id", (req, res) => {
   });
 });
 
-api.get("/cases/:id/timeline", (req, res) => {
+api.get("/cases/:id/timeline", (req: Request, res: Response) => {
   const state = loadState();
   const activities = state.caseActivities.filter((a) => a.caseId === req.params.id);
   res.json({ data: activities });
@@ -718,7 +718,7 @@ api.get("/cases/:id/timeline", (req, res) => {
 // 7. Scoped Tasks API & Role-Based Action Authorization
 // ----------------------------------------------------------------------------
 
-api.get("/tasks/my", requireAuth, (req, res) => {
+api.get("/tasks/my", requireAuth, (req: Request, res: Response) => {
   const state = loadState();
   const user = (req as any).user;
 
@@ -1103,7 +1103,7 @@ api.post("/cases/:id/complete-stage", requireAuth, handleCaseAdvance);
 api.post(
   "/tasks/:id/field-verification",
   requireRole("FIELD_OFFICER", "SUPER_ADMIN"),
-  (req, res) => {
+  (req: Request, res: Response) => {
     const state = loadState();
     const user = (req as any).user;
     const task = state.tasks.find((t) => t.id === req.params.id);
@@ -1249,7 +1249,7 @@ api.post(
 );
 
 // Reject / Request Correction
-api.post("/tasks/:id/reject", requireAuth, (req, res) => {
+api.post("/tasks/:id/reject", requireAuth, (req: Request, res: Response) => {
   const state = loadState();
   const user = (req as any).user;
   const task = state.tasks.find((t) => t.id === req.params.id);
@@ -1269,7 +1269,7 @@ api.post("/tasks/:id/reject", requireAuth, (req, res) => {
   res.json({ data: { message: "Task rejected. Case put on hold.", task } });
 });
 
-api.post("/tasks/:id/correction", requireAuth, (req, res) => {
+api.post("/tasks/:id/correction", requireAuth, (req: Request, res: Response) => {
   const state = loadState();
   const user = (req as any).user;
   const task = state.tasks.find((t) => t.id === req.params.id);
@@ -1319,7 +1319,7 @@ api.post("/tasks/:id/correction", requireAuth, (req, res) => {
 // 8. Financials: Compensation & PFMS Direct Benefit Transfer (DBT)
 // ----------------------------------------------------------------------------
 
-api.get("/compensation", (_req, res) => {
+api.get("/compensation", (_req: Request, res: Response) => {
   const state = loadState();
   res.json({ data: state.compensation });
 });
@@ -1327,7 +1327,7 @@ api.get("/compensation", (_req, res) => {
 api.patch(
   "/compensation/:id",
   requireRole("COMPENSATION_OFFICER", "COMPENSATION_REVIEWER", "FINANCE_OFFICER", "DISTRICT_OFFICER", "SUPER_ADMIN"),
-  (req, res) => {
+  (req: Request, res: Response) => {
     const state = loadState();
     const user = (req as any).user;
     const item = state.compensation.find((cr) => cr.id === req.params.id || cr.caseId === req.params.id);
@@ -1424,7 +1424,7 @@ api.patch(
   },
 );
 
-api.post("/compensation/:id/sync", requireAuth, (req, res) => {
+api.post("/compensation/:id/sync", requireAuth, (req: Request, res: Response) => {
   const state = loadState();
   const user = (req as any).user;
   const item = state.compensation.find((cr) => cr.id === req.params.id);
@@ -1452,7 +1452,7 @@ api.post("/compensation/:id/sync", requireAuth, (req, res) => {
 // 9. R&R Entitlements API
 // ----------------------------------------------------------------------------
 
-api.get("/rr", (_req, res) => {
+api.get("/rr", (_req: Request, res: Response) => {
   const state = loadState();
   res.json({ data: state.rr });
 });
@@ -1460,7 +1460,7 @@ api.get("/rr", (_req, res) => {
 api.patch(
   "/rr/:id",
   requireRole("RR_OFFICER", "RR_REVIEWER", "DISTRICT_OFFICER", "SUPER_ADMIN"),
-  (req, res) => {
+  (req: Request, res: Response) => {
     const state = loadState();
     const user = (req as any).user;
     const item = state.rr.find((r) => r.id === req.params.id || r.caseId === req.params.id);
@@ -1551,7 +1551,7 @@ api.patch(
 // 10. Site Possession API
 // ----------------------------------------------------------------------------
 
-api.get("/possession", (_req, res) => {
+api.get("/possession", (_req: Request, res: Response) => {
   const state = loadState();
   res.json({ data: state.possession });
 });
@@ -1559,7 +1559,7 @@ api.get("/possession", (_req, res) => {
 api.patch(
   "/possession/:id",
   requireRole("DISTRICT_OFFICER", "SUPER_ADMIN"),
-  (req, res) => {
+  (req: Request, res: Response) => {
     const state = loadState();
     const user = (req as any).user;
     const item = state.possession.find((p) => p.id === req.params.id || p.caseId === req.params.id);
@@ -1636,12 +1636,12 @@ api.patch(
 // 11. Documents & Statutory Gazette Registry
 // ----------------------------------------------------------------------------
 
-api.get("/documents", (_req, res) => {
+api.get("/documents", (_req: Request, res: Response) => {
   const state = loadState();
   res.json({ data: state.documents });
 });
 
-api.get("/documents/types", (_req, res) => {
+api.get("/documents/types", (_req: Request, res: Response) => {
   res.json({
     data: [
       { type: "PROJECT_APPROVAL", label: "Administrative Sanction / Project Approval" },
@@ -1706,7 +1706,7 @@ api.post("/documents", requireAuth, handleDocumentUpload);
 // 12. GIS GeoJSON Spatial Endpoint
 // ----------------------------------------------------------------------------
 
-api.get("/gis/projects/:id/parcels", (req, res) => {
+api.get("/gis/projects/:id/parcels", (req: Request, res: Response) => {
   const state = loadState();
   const project = state.projects.find((p) => p.id === req.params.id || p.projectId === req.params.id);
 
@@ -1750,7 +1750,7 @@ api.get("/gis/projects/:id/parcels", (req, res) => {
 // 13. Integration Center & BhoomiRashi Sync
 // ----------------------------------------------------------------------------
 
-api.get("/integrations", (_req, res) => {
+api.get("/integrations", (_req: Request, res: Response) => {
   const state = loadState();
   const projects = state.projects || [];
   const compensation = state.compensation || [];
@@ -1785,7 +1785,7 @@ api.get("/integrations", (_req, res) => {
   });
 });
 
-api.get("/integrations/mappings", (_req, res) => {
+api.get("/integrations/mappings", (_req: Request, res: Response) => {
   const state = loadState();
   const projects = state.projects || [];
   const parcels = state.parcels || [];
@@ -1819,7 +1819,7 @@ api.get("/integrations/mappings", (_req, res) => {
 
 api.post(
   "/integrations/bhoomirashi/sync",
-  (req, res) => {
+  (req: Request, res: Response) => {
     const state = loadState();
     const user = getAuthUser(req);
     const actorEmail = user?.email || "national.admin@demo.nlams.gov";
@@ -1841,7 +1841,7 @@ api.post(
   },
 );
 
-api.post("/integrations/:system/sync", (req, res) => {
+api.post("/integrations/:system/sync", (req: Request, res: Response) => {
   const state = loadState();
   const user = getAuthUser(req);
   const sys = String(req.params.system);
@@ -1862,7 +1862,7 @@ api.post("/integrations/:system/sync", (req, res) => {
 // 14. Scoped Notifications API
 // ----------------------------------------------------------------------------
 
-api.get("/notifications", requireAuth, (req, res) => {
+api.get("/notifications", requireAuth, (req: Request, res: Response) => {
   const state = loadState();
   const user = (req as any).user;
 
@@ -1878,7 +1878,7 @@ api.get("/notifications", requireAuth, (req, res) => {
   res.json({ data: scoped });
 });
 
-api.patch("/notifications/:id/read", requireAuth, (req, res) => {
+api.patch("/notifications/:id/read", requireAuth, (req: Request, res: Response) => {
   const state = loadState();
   const notif = state.notifications.find((n) => n.id === req.params.id);
   if (notif) {
@@ -1888,7 +1888,7 @@ api.patch("/notifications/:id/read", requireAuth, (req, res) => {
   res.json({ data: notif });
 });
 
-api.patch("/notifications/read-all", requireAuth, (req, res) => {
+api.patch("/notifications/read-all", requireAuth, (req: Request, res: Response) => {
   const state = loadState();
   const user = (req as any).user;
   for (const n of state.notifications) {
@@ -1904,12 +1904,12 @@ api.patch("/notifications/read-all", requireAuth, (req, res) => {
 // 15. Immutable Audit Logs & Reports
 // ----------------------------------------------------------------------------
 
-api.get("/audit", (_req, res) => {
+api.get("/audit", (_req: Request, res: Response) => {
   const state = loadState();
   res.json({ data: state.audit });
 });
 
-api.get("/reports/summary", (_req, res) => {
+api.get("/reports/summary", (_req: Request, res: Response) => {
   const state = loadState();
   const summary = state.projects.map((p) => {
     const projectCases = state.cases.filter((c) => c.projectId === p.id);

@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -34,7 +34,7 @@ app.use(
 
 app.use(rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: true, legacyHeaders: false }));
 app.use(express.json({ limit: '10mb' }));
-app.use((req, _res, next) => {
+app.use((req: Request, _res: Response, next: NextFunction) => {
   console.info(
     JSON.stringify({
       level: 'info',
@@ -47,7 +47,7 @@ app.use((req, _res, next) => {
 });
 
 // Root health check endpoint for monitoring/deployment platforms
-app.get('/health', (_req, res) => {
+app.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     service: 'nlams-api',
