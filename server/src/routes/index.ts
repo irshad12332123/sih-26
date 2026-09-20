@@ -1,4 +1,9 @@
-import { Router, type Request, type Response, type NextFunction } from "express";
+import {
+  Router,
+  type Request,
+  type Response,
+  type NextFunction,
+} from "express";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import {
@@ -31,7 +36,9 @@ export const api = Router();
 // ----------------------------------------------------------------------------
 
 export function getAuthUser(req: Request) {
-  const token = req.headers.authorization?.replace("Bearer ", "") || (req.headers["x-user-id"] as string);
+  const token =
+    req.headers.authorization?.replace("Bearer ", "") ||
+    (req.headers["x-user-id"] as string);
   const state = loadState();
   if (!token) return null;
 
@@ -49,7 +56,10 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const user = getAuthUser(req);
   if (!user) {
     return res.status(401).json({
-      error: { code: "UNAUTHORIZED", message: "Authentication required for this operation." },
+      error: {
+        code: "UNAUTHORIZED",
+        message: "Authentication required for this operation.",
+      },
     });
   }
   (req as any).user = user;
@@ -68,10 +78,14 @@ export function requireRole(...allowedRoles: DemoRole[]) {
     const hasRole =
       allowedRoles.includes(user.role) ||
       user.role === "SUPER_ADMIN" ||
-      (allowedRoles.includes("PROJECT_OFFICER") && user.role === "PROJECT_AUTHORITY") ||
-      (allowedRoles.includes("PROJECT_AUTHORITY") && user.role === "PROJECT_OFFICER") ||
-      (allowedRoles.includes("COMPENSATION_REVIEWER") && user.role === "FINANCE_OFFICER") ||
-      (allowedRoles.includes("FINANCE_OFFICER") && user.role === "COMPENSATION_REVIEWER");
+      (allowedRoles.includes("PROJECT_OFFICER") &&
+        user.role === "PROJECT_AUTHORITY") ||
+      (allowedRoles.includes("PROJECT_AUTHORITY") &&
+        user.role === "PROJECT_OFFICER") ||
+      (allowedRoles.includes("COMPENSATION_REVIEWER") &&
+        user.role === "FINANCE_OFFICER") ||
+      (allowedRoles.includes("FINANCE_OFFICER") &&
+        user.role === "COMPENSATION_REVIEWER");
 
     if (!hasRole) {
       return res.status(403).json({
@@ -108,7 +122,8 @@ api.post("/demo/reset", (_req: Request, res: Response) => {
   const fresh = resetState();
   res.json({
     data: {
-      message: "N-LAMS demonstration environment reset to clean baseline. No external or native projects present.",
+      message:
+        "N-LAMS demonstration environment reset to clean baseline. No external or native projects present.",
       projects: fresh.projects.length,
       cases: fresh.cases.length,
       parcels: fresh.parcels.length,
@@ -124,19 +139,30 @@ api.post("/demo/reset", (_req: Request, res: Response) => {
 // ----------------------------------------------------------------------------
 
 api.post("/auth/login", (req: Request, res: Response) => {
-  const input = z.object({ email: z.string().min(1), password: z.string().min(1) }).parse(req.body);
+  const input = z
+    .object({ email: z.string().min(1), password: z.string().min(1) })
+    .parse(req.body);
   const state = loadState();
   const normalizedEmail = input.email.trim().toLowerCase();
 
   const user = state.users.find((u) => {
-    const emailMatch = u.email.toLowerCase() === normalizedEmail || u.id.toLowerCase() === normalizedEmail;
-    const passwordMatch = input.password === "Demo@123" || u.password === input.password || input.password === "Admin@123";
+    const emailMatch =
+      u.email.toLowerCase() === normalizedEmail ||
+      u.id.toLowerCase() === normalizedEmail;
+    const passwordMatch =
+      input.password === "Demo@123" ||
+      u.password === input.password ||
+      input.password === "Admin@123";
     return emailMatch && passwordMatch;
   });
 
   if (!user) {
     return res.status(401).json({
-      error: { code: "INVALID_CREDENTIALS", message: "Invalid demo credentials. Use Demo@123 or select a 1-click role." },
+      error: {
+        code: "INVALID_CREDENTIALS",
+        message:
+          "Invalid demo credentials. Use Demo@123 or select a 1-click role.",
+      },
     });
   }
 
@@ -261,7 +287,9 @@ api.get("/dashboard/summary", (_req: Request, res: Response) => {
   const possession = state.possession || [];
 
   const active = projects.filter((p) => p?.status !== "Completed").length;
-  const highRisk = cases.filter((c) => ["High", "HIGH", "Critical"].includes(c?.risk || "")).length;
+  const highRisk = cases.filter((c) =>
+    ["High", "HIGH", "Critical"].includes(c?.risk || ""),
+  ).length;
 
   res.json({
     data: {
@@ -269,21 +297,61 @@ api.get("/dashboard/summary", (_req: Request, res: Response) => {
       activeProjects: active,
       totalCases: cases.length,
       totalParcels: parcels.length,
-      acquiredParcels: parcels.filter((p) => ["POSSESSION_COMPLETED", "ACQUIRED"].includes(p?.acquisitionStatus || "")).length,
-      landRequiredHa: Number(projects.reduce((sum, p) => sum + (Number(p?.landRequiredHa) || 0), 0).toFixed(2)),
-      landAcquiredHa: Number(projects.reduce((sum, p) => sum + (Number(p?.landAcquiredHa) || 0), 0).toFixed(2)),
-      inProgress: cases.filter((c) => ["In Progress", "Under Review", "Submitted"].includes(c?.status || "")).length,
-      completed: cases.filter((c) => ["Completed", "Approved", "Possession Completed"].includes(c?.status || "")).length,
+      acquiredParcels: parcels.filter((p) =>
+        ["POSSESSION_COMPLETED", "ACQUIRED"].includes(
+          p?.acquisitionStatus || "",
+        ),
+      ).length,
+      landRequiredHa: Number(
+        projects
+          .reduce((sum, p) => sum + (Number(p?.landRequiredHa) || 0), 0)
+          .toFixed(2),
+      ),
+      landAcquiredHa: Number(
+        projects
+          .reduce((sum, p) => sum + (Number(p?.landAcquiredHa) || 0), 0)
+          .toFixed(2),
+      ),
+      inProgress: cases.filter((c) =>
+        ["In Progress", "Under Review", "Submitted"].includes(c?.status || ""),
+      ).length,
+      completed: cases.filter((c) =>
+        ["Completed", "Approved", "Possession Completed"].includes(
+          c?.status || "",
+        ),
+      ).length,
       atRisk: highRisk,
-      pendingTasks: tasks.filter((t) => t?.status === "PENDING" || t?.status === "IN_PROGRESS").length,
-      compensationAssessed: compensation.reduce((sum, item) => sum + (Number(item?.assessedAmount) || 0), 0),
-      compensationApproved: compensation.reduce((sum, item) => sum + (Number(item?.approvedAmount) || 0), 0),
-      compensationPaid: compensation.reduce((sum, item) => sum + (Number(item?.paidAmount) || 0), 0),
-      rrFamiliesAffected: rr.reduce((sum, item) => sum + (Number(item?.affectedFamilies) || 0), 0),
-      rrFamiliesDelivered: rr.reduce((sum, item) => sum + (Number(item?.benefitsDelivered) || 0), 0),
-      possessionsCompleted: possession.filter((pr) => pr?.status === "POSSESSION_COMPLETED").length,
-      externalProjectsCount: projects.filter((p) => p?.sourceType === "EXTERNAL").length,
-      nativeProjectsCount: projects.filter((p) => p?.sourceType === "NATIVE").length,
+      pendingTasks: tasks.filter(
+        (t) => t?.status === "PENDING" || t?.status === "IN_PROGRESS",
+      ).length,
+      compensationAssessed: compensation.reduce(
+        (sum, item) => sum + (Number(item?.assessedAmount) || 0),
+        0,
+      ),
+      compensationApproved: compensation.reduce(
+        (sum, item) => sum + (Number(item?.approvedAmount) || 0),
+        0,
+      ),
+      compensationPaid: compensation.reduce(
+        (sum, item) => sum + (Number(item?.paidAmount) || 0),
+        0,
+      ),
+      rrFamiliesAffected: rr.reduce(
+        (sum, item) => sum + (Number(item?.affectedFamilies) || 0),
+        0,
+      ),
+      rrFamiliesDelivered: rr.reduce(
+        (sum, item) => sum + (Number(item?.benefitsDelivered) || 0),
+        0,
+      ),
+      possessionsCompleted: possession.filter(
+        (pr) => pr?.status === "POSSESSION_COMPLETED",
+      ).length,
+      externalProjectsCount: projects.filter(
+        (p) => p?.sourceType === "EXTERNAL",
+      ).length,
+      nativeProjectsCount: projects.filter((p) => p?.sourceType === "NATIVE")
+        .length,
     },
   });
 });
@@ -299,14 +367,24 @@ api.get("/projects", (_req: Request, res: Response) => {
 
 api.get("/projects/:id", (req: Request, res: Response) => {
   const state = loadState();
-  const project = state.projects.find((p) => p.id === req.params.id || p.projectId === req.params.id);
+  const project = state.projects.find(
+    (p) => p.id === req.params.id || p.projectId === req.params.id,
+  );
   if (!project) {
-    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Project not found" } });
+    return res
+      .status(404)
+      .json({ error: { code: "NOT_FOUND", message: "Project not found" } });
   }
 
-  const projectParcels = state.parcels.filter((p) => p.projectId === project.id);
+  const projectParcels = state.parcels.filter(
+    (p) => p.projectId === project.id,
+  );
   const projectCases = state.cases.filter((c) => c.projectId === project.id);
-  const syncHistory = state.syncOperations.filter((s) => s.localProjectId === project.projectId || s.externalProjectId === project.externalProjectId);
+  const syncHistory = state.syncOperations.filter(
+    (s) =>
+      s.localProjectId === project.projectId ||
+      s.externalProjectId === project.externalProjectId,
+  );
 
   res.json({
     data: {
@@ -320,7 +398,12 @@ api.get("/projects/:id", (req: Request, res: Response) => {
 
 api.post(
   "/projects",
-  requireRole("PROJECT_OFFICER", "PROJECT_AUTHORITY", "NATIONAL_ADMIN", "SUPER_ADMIN"),
+  requireRole(
+    "PROJECT_OFFICER",
+    "PROJECT_AUTHORITY",
+    "NATIONAL_ADMIN",
+    "SUPER_ADMIN",
+  ),
   (req: Request, res: Response) => {
     const input = z
       .object({
@@ -345,7 +428,9 @@ api.post(
     const state = loadState();
     const user = (req as any).user;
     const projectRecordId = `prj-native-${Date.now()}`;
-    const projectCode = input.projectId || `HR-INFRA-2026-${String(state.projects.length + 1).padStart(3, "0")}`;
+    const projectCode =
+      input.projectId ||
+      `HR-INFRA-2026-${String(state.projects.length + 1).padStart(3, "0")}`;
 
     const newProject: Project = {
       id: projectRecordId,
@@ -361,12 +446,16 @@ api.post(
       status: input.submitImmediately ? "Submitted" : "Draft",
       progress: input.submitImmediately ? 10 : 0,
       targetDate: input.targetDate || "2027-12-31",
-      description: input.description || "Native State Infrastructure Corridor Project.",
-      alignment: input.alignment && input.alignment.length > 0 ? (input.alignment as [number, number][]) : [
-        [30.368, 76.782],
-        [30.380, 76.812],
-        [30.395, 76.850],
-      ],
+      description:
+        input.description || "Native State Infrastructure Corridor Project.",
+      alignment:
+        input.alignment && input.alignment.length > 0
+          ? (input.alignment as [number, number][])
+          : [
+              [30.368, 76.782],
+              [30.38, 76.812],
+              [30.395, 76.85],
+            ],
       bufferMeters: input.bufferMeters || 100,
       workflowTemplateId: "HARYANA_NATIVE_DEMO_WORKFLOW",
       sourceType: "NATIVE",
@@ -379,30 +468,48 @@ api.post(
     };
 
     // Associate Master Cadastral Parcels
-    const selectedIds = input.selectedParcelIds || ["pcl-hr-amb-001", "pcl-hr-amb-002", "pcl-hr-amb-003"];
+    const selectedIds = input.selectedParcelIds || [
+      "pcl-hr-amb-001",
+      "pcl-hr-amb-002",
+      "pcl-hr-amb-003",
+    ];
     const associatedParcels: Parcel[] = [];
 
     for (const pid of selectedIds) {
-      const masterP = state.masterParcelsPool.find((mp) => mp.id === pid || mp.parcelId === pid);
+      const masterP = state.masterParcelsPool.find(
+        (mp) => mp.id === pid || mp.parcelId === pid,
+      );
       if (masterP) {
         const assignedParcel: Parcel = {
           ...masterP,
           projectId: projectRecordId,
-          acquisitionStatus: input.submitImmediately ? "ADMINISTRATIVE_REVIEW" : "IDENTIFIED",
+          acquisitionStatus: input.submitImmediately
+            ? "ADMINISTRATIVE_REVIEW"
+            : "IDENTIFIED",
         };
         state.parcels.push(assignedParcel);
         associatedParcels.push(assignedParcel);
       }
     }
 
-    newProject.landRequiredHa = Number(associatedParcels.reduce((sum, p) => sum + p.requiredArea, 0).toFixed(2));
+    newProject.landRequiredHa = Number(
+      associatedParcels.reduce((sum, p) => sum + p.requiredArea, 0).toFixed(2),
+    );
     newProject.affectedParcelsCount = associatedParcels.length;
     state.projects.unshift(newProject);
 
-    audit(state, user.email, user.role, "PROJECT_CREATED", "PROJECT", projectCode, {
-      name: newProject.name,
-      parcelsCount: associatedParcels.length,
-    });
+    audit(
+      state,
+      user.email,
+      user.role,
+      "PROJECT_CREATED",
+      "PROJECT",
+      projectCode,
+      {
+        name: newProject.name,
+        parcelsCount: associatedParcels.length,
+      },
+    );
 
     // If submitted immediately, execute submission workflow
     if (input.submitImmediately) {
@@ -416,19 +523,30 @@ api.post(
 
 api.post(
   "/projects/:id/submit",
-  requireRole("PROJECT_OFFICER", "PROJECT_AUTHORITY", "NATIONAL_ADMIN", "SUPER_ADMIN"),
+  requireRole(
+    "PROJECT_OFFICER",
+    "PROJECT_AUTHORITY",
+    "NATIONAL_ADMIN",
+    "SUPER_ADMIN",
+  ),
   (req: Request, res: Response) => {
     const state = loadState();
     const user = (req as any).user;
-    const project = state.projects.find((p) => p.id === req.params.id || p.projectId === req.params.id);
+    const project = state.projects.find(
+      (p) => p.id === req.params.id || p.projectId === req.params.id,
+    );
 
     if (!project) {
-      return res.status(404).json({ error: { code: "NOT_FOUND", message: "Project not found" } });
+      return res
+        .status(404)
+        .json({ error: { code: "NOT_FOUND", message: "Project not found" } });
     }
 
     project.status = "Submitted";
     project.progress = 10;
-    const projectParcels = state.parcels.filter((p) => p.projectId === project.id);
+    const projectParcels = state.parcels.filter(
+      (p) => p.projectId === project.id,
+    );
 
     executeProjectSubmission(state, project, projectParcels, user);
     saveState();
@@ -442,8 +560,15 @@ api.post(
   },
 );
 
-function executeProjectSubmission(state: ReturnType<typeof loadState>, project: Project, parcels: Parcel[], user: any) {
-  const adminStage = state.workflowStages.find((s) => s.id === "stage-admin-rev") || state.workflowStages[1];
+function executeProjectSubmission(
+  state: ReturnType<typeof loadState>,
+  project: Project,
+  parcels: Parcel[],
+  user: any,
+) {
+  const adminStage =
+    state.workflowStages.find((s) => s.id === "stage-admin-rev") ||
+    state.workflowStages[1];
 
   // Resolve responsible District Officer in Ambala
   const districtOfficer = findResponsibleOfficer(state, {
@@ -469,8 +594,12 @@ function executeProjectSubmission(state: ReturnType<typeof loadState>, project: 
       currentStage: adminStage.name,
       progress: 10,
       assignedOfficerId: districtOfficer.email,
-      dueDate: new Date(Date.now() + adminStage.slaDays * 86400000).toISOString(),
-      externalRefs: [{ system: "State Land Records (Jamabandi)", id: p.sourceReference }],
+      dueDate: new Date(
+        Date.now() + adminStage.slaDays * 86400000,
+      ).toISOString(),
+      externalRefs: [
+        { system: "State Land Records (Jamabandi)", id: p.sourceReference },
+      ],
       acquisitionPurpose: project.name,
       createdAt: new Date().toISOString(),
     };
@@ -555,10 +684,18 @@ function executeProjectSubmission(state: ReturnType<typeof loadState>, project: 
     task.id,
   );
 
-  audit(state, user.email, user.role, "PROJECT_SUBMITTED", "PROJECT", project.projectId, {
-    assignedTo: districtOfficer.email,
-    casesCount: parcels.length,
-  });
+  audit(
+    state,
+    user.email,
+    user.role,
+    "PROJECT_SUBMITTED",
+    "PROJECT",
+    project.projectId,
+    {
+      assignedTo: districtOfficer.email,
+      casesCount: parcels.length,
+    },
+  );
 }
 
 // ----------------------------------------------------------------------------
@@ -574,14 +711,26 @@ api.get("/cases", (req: Request, res: Response) => {
 
   if (user) {
     const role = user.role;
-    if (role === "NATIONAL_ADMIN" || role === "SUPER_ADMIN" || role === "VIEWER") {
+    if (
+      role === "NATIONAL_ADMIN" ||
+      role === "SUPER_ADMIN" ||
+      role === "VIEWER"
+    ) {
       filtered = cases;
     } else if (role === "FIELD_OFFICER") {
       filtered = cases.filter((c) => {
-        const p = state.parcels.find((item) => item.id === c.parcelId || item.parcelId === c.parcelId);
-        if (c.assignedOfficerId === user.email || c.assignedOfficerId === user.id) return true;
+        const p = state.parcels.find(
+          (item) => item.id === c.parcelId || item.parcelId === c.parcelId,
+        );
+        if (
+          c.assignedOfficerId === user.email ||
+          c.assignedOfficerId === user.id
+        )
+          return true;
         const hasTask = state.tasks.some(
-          (t) => t.caseId === c.id && (t.assignedUserId === user.email || t.assignedUserId === user.id),
+          (t) =>
+            t.caseId === c.id &&
+            (t.assignedUserId === user.email || t.assignedUserId === user.id),
         );
         if (hasTask) return true;
 
@@ -598,8 +747,14 @@ api.get("/cases", (req: Request, res: Response) => {
       });
     } else if (role === "PROJECT_OFFICER" || role === "PROJECT_AUTHORITY") {
       filtered = cases.filter((c) => {
-        const proj = state.projects.find((item) => item.id === c.projectId || item.projectId === c.projectId);
-        if (c.assignedOfficerId === user.email || c.assignedOfficerId === user.id) return true;
+        const proj = state.projects.find(
+          (item) => item.id === c.projectId || item.projectId === c.projectId,
+        );
+        if (
+          c.assignedOfficerId === user.email ||
+          c.assignedOfficerId === user.id
+        )
+          return true;
         if (!proj) return true;
         if (user.district && user.district !== "All" && proj.district) {
           return user.district.toLowerCase() === proj.district.toLowerCase();
@@ -611,26 +766,50 @@ api.get("/cases", (req: Request, res: Response) => {
       });
     } else if (role === "DISTRICT_OFFICER" || role === "REVIEWER") {
       filtered = cases.filter((c) => {
-        const p = state.parcels.find((item) => item.id === c.parcelId || item.parcelId === c.parcelId);
-        const proj = state.projects.find((item) => item.id === c.projectId || item.projectId === c.projectId);
-        if (c.assignedOfficerId === user.email || c.assignedOfficerId === user.id) return true;
+        const p = state.parcels.find(
+          (item) => item.id === c.parcelId || item.parcelId === c.parcelId,
+        );
+        const proj = state.projects.find(
+          (item) => item.id === c.projectId || item.projectId === c.projectId,
+        );
+        if (
+          c.assignedOfficerId === user.email ||
+          c.assignedOfficerId === user.id
+        )
+          return true;
         if (user.district === "All" || !user.district) return true;
         return (
           p?.district?.toLowerCase() === user.district.toLowerCase() ||
           proj?.district?.toLowerCase() === user.district.toLowerCase()
         );
       });
-    } else if (role === "COMPENSATION_OFFICER" || role === "COMPENSATION_REVIEWER" || role === "FINANCE_OFFICER") {
+    } else if (
+      role === "COMPENSATION_OFFICER" ||
+      role === "COMPENSATION_REVIEWER" ||
+      role === "FINANCE_OFFICER"
+    ) {
       filtered = cases.filter((c) => {
-        const p = state.parcels.find((item) => item.id === c.parcelId || item.parcelId === c.parcelId);
-        if (c.assignedOfficerId === user.email || c.assignedOfficerId === user.id) return true;
+        const p = state.parcels.find(
+          (item) => item.id === c.parcelId || item.parcelId === c.parcelId,
+        );
+        if (
+          c.assignedOfficerId === user.email ||
+          c.assignedOfficerId === user.id
+        )
+          return true;
         if (user.district === "All" || !user.district) return true;
         return p?.district?.toLowerCase() === user.district.toLowerCase();
       });
     } else if (role === "RR_OFFICER" || role === "RR_REVIEWER") {
       filtered = cases.filter((c) => {
-        const p = state.parcels.find((item) => item.id === c.parcelId || item.parcelId === c.parcelId);
-        if (c.assignedOfficerId === user.email || c.assignedOfficerId === user.id) return true;
+        const p = state.parcels.find(
+          (item) => item.id === c.parcelId || item.parcelId === c.parcelId,
+        );
+        if (
+          c.assignedOfficerId === user.email ||
+          c.assignedOfficerId === user.id
+        )
+          return true;
         if (user.district === "All" || !user.district) return true;
         return p?.district?.toLowerCase() === user.district.toLowerCase();
       });
@@ -639,20 +818,30 @@ api.get("/cases", (req: Request, res: Response) => {
 
   // Hydrate all case properties for frontend list views
   const hydrated = filtered.map((c) => {
-    const p = state.parcels.find((item) => item.id === c.parcelId || item.parcelId === c.parcelId);
-    const proj = state.projects.find((item) => item.id === c.projectId || item.projectId === c.projectId);
-    const assignedOfficer = state.users.find((u) => u.email === c.assignedOfficerId || u.id === c.assignedOfficerId);
+    const p = state.parcels.find(
+      (item) => item.id === c.parcelId || item.parcelId === c.parcelId,
+    );
+    const proj = state.projects.find(
+      (item) => item.id === c.projectId || item.projectId === c.projectId,
+    );
+    const assignedOfficer = state.users.find(
+      (u) => u.email === c.assignedOfficerId || u.id === c.assignedOfficerId,
+    );
 
     return {
       ...c,
-      projectName: proj?.name || c.acquisitionPurpose || "Infrastructure Corridor",
+      projectName:
+        proj?.name || c.acquisitionPurpose || "Infrastructure Corridor",
       village: p?.village || proj?.village || "",
       tehsil: p?.tehsil || proj?.tehsil || "",
       district: p?.district || proj?.district || "",
       state: p?.state || proj?.state || "",
       surveyNumber: p?.surveyNumber || "",
       parcelNumber: p?.parcelId || c.parcelId,
-      officer: assignedOfficer?.displayName || c.assignedOfficerId || "Assigned by jurisdiction",
+      officer:
+        assignedOfficer?.displayName ||
+        c.assignedOfficerId ||
+        "Assigned by jurisdiction",
       project: proj,
       parcel: p,
     };
@@ -663,28 +852,42 @@ api.get("/cases", (req: Request, res: Response) => {
 
 api.get("/cases/:id", (req: Request, res: Response) => {
   const state = loadState();
-  const c = state.cases.find((item) => item.id === req.params.id || item.caseId === req.params.id);
+  const c = state.cases.find(
+    (item) => item.id === req.params.id || item.caseId === req.params.id,
+  );
   if (!c) {
-    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Case not found" } });
+    return res
+      .status(404)
+      .json({ error: { code: "NOT_FOUND", message: "Case not found" } });
   }
 
-  const project = state.projects.find((p) => p.id === c.projectId || p.projectId === c.projectId);
-  const parcel = state.parcels.find((p) => p.id === c.parcelId || p.parcelId === c.parcelId);
+  const project = state.projects.find(
+    (p) => p.id === c.projectId || p.projectId === c.projectId,
+  );
+  const parcel = state.parcels.find(
+    (p) => p.id === c.parcelId || p.parcelId === c.parcelId,
+  );
   const rawTasks = state.tasks.filter((t) => t.caseId === c.id);
   const tasks = rawTasks.map((t) => {
     const stage = state.workflowStages.find((s) => s.id === t.stageId);
-    const assignedUser = state.users.find((u) => u.email === t.assignedUserId || u.id === t.assignedUserId);
+    const assignedUser = state.users.find(
+      (u) => u.email === t.assignedUserId || u.id === t.assignedUserId,
+    );
     return {
       ...t,
       stage,
       assignedUser,
     };
   });
-  const documents = state.documents.filter((d) => d.caseId === c.id || d.projectId === c.projectId);
+  const documents = state.documents.filter(
+    (d) => d.caseId === c.id || d.projectId === c.projectId,
+  );
   const comp = state.compensation.find((cr) => cr.caseId === c.id);
   const rrRec = state.rr.find((r) => r.caseId === c.id);
   const posRec = state.possession.find((p) => p.caseId === c.id);
-  const assignedOfficer = state.users.find((u) => u.email === c.assignedOfficerId || u.id === c.assignedOfficerId);
+  const assignedOfficer = state.users.find(
+    (u) => u.email === c.assignedOfficerId || u.id === c.assignedOfficerId,
+  );
 
   res.json({
     data: {
@@ -695,7 +898,10 @@ api.get("/cases/:id", (req: Request, res: Response) => {
       state: parcel?.state || project?.state,
       surveyNumber: parcel?.surveyNumber,
       parcelNumber: parcel?.parcelId || c.parcelId,
-      officer: assignedOfficer?.displayName || c.assignedOfficerId || "Assigned by jurisdiction",
+      officer:
+        assignedOfficer?.displayName ||
+        c.assignedOfficerId ||
+        "Assigned by jurisdiction",
       assignedOfficer,
       project,
       parcel,
@@ -710,7 +916,9 @@ api.get("/cases/:id", (req: Request, res: Response) => {
 
 api.get("/cases/:id/timeline", (req: Request, res: Response) => {
   const state = loadState();
-  const activities = state.caseActivities.filter((a) => a.caseId === req.params.id);
+  const activities = state.caseActivities.filter(
+    (a) => a.caseId === req.params.id,
+  );
   res.json({ data: activities });
 });
 
@@ -727,52 +935,83 @@ api.get("/tasks/my", requireAuth, (req: Request, res: Response) => {
     if (t.status === "COMPLETED") return false;
 
     // Direct assignment match
-    if (t.assignedUserId === user.id || t.assignedUserId === user.email) return true;
+    if (t.assignedUserId === user.id || t.assignedUserId === user.email)
+      return true;
 
     const taskCase = state.cases.find((c) => c.id === t.caseId);
-    const taskParcel = taskCase ? state.parcels.find((p) => p.id === taskCase.parcelId) : null;
+    const taskParcel = taskCase
+      ? state.parcels.find((p) => p.id === taskCase.parcelId)
+      : null;
     const taskStage = state.workflowStages.find((s) => s.id === t.stageId);
 
     if (!taskStage) return false;
 
     // Field Officer Queue: Must match FIELD_OFFICER role + Tehsil/Village jurisdiction
-    if (user.role === "FIELD_OFFICER" && taskStage.responsibleRole === "FIELD_OFFICER") {
+    if (
+      user.role === "FIELD_OFFICER" &&
+      taskStage.responsibleRole === "FIELD_OFFICER"
+    ) {
       if (user.village && taskParcel?.village) {
         return user.village.toLowerCase() === taskParcel.village.toLowerCase();
       }
       if (user.tehsil && taskParcel?.tehsil) {
         return user.tehsil.toLowerCase() === taskParcel.tehsil.toLowerCase();
       }
-      return user.district?.toLowerCase() === taskParcel?.district?.toLowerCase();
+      return (
+        user.district?.toLowerCase() === taskParcel?.district?.toLowerCase()
+      );
     }
 
     // Reviewer Queue: Must match REVIEWER role + District/Tehsil
     if (user.role === "REVIEWER" && taskStage.responsibleRole === "REVIEWER") {
-      return !taskParcel || user.district?.toLowerCase() === taskParcel.district?.toLowerCase() || user.district === "All";
+      return (
+        !taskParcel ||
+        user.district?.toLowerCase() === taskParcel.district?.toLowerCase() ||
+        user.district === "All"
+      );
     }
 
     // District Officer Queue: Must match DISTRICT_OFFICER role + District
-    if (user.role === "DISTRICT_OFFICER" && taskStage.responsibleRole === "DISTRICT_OFFICER") {
-      return !taskParcel || user.district?.toLowerCase() === taskParcel.district?.toLowerCase() || user.district === "All";
+    if (
+      user.role === "DISTRICT_OFFICER" &&
+      taskStage.responsibleRole === "DISTRICT_OFFICER"
+    ) {
+      return (
+        !taskParcel ||
+        user.district?.toLowerCase() === taskParcel.district?.toLowerCase() ||
+        user.district === "All"
+      );
     }
 
     // Compensation Officer Queue
-    if (user.role === "COMPENSATION_OFFICER" && taskStage.responsibleRole === "COMPENSATION_OFFICER") {
+    if (
+      user.role === "COMPENSATION_OFFICER" &&
+      taskStage.responsibleRole === "COMPENSATION_OFFICER"
+    ) {
       return true;
     }
 
     // Compensation Reviewer Queue
-    if (user.role === "COMPENSATION_REVIEWER" && taskStage.responsibleRole === "COMPENSATION_REVIEWER") {
+    if (
+      user.role === "COMPENSATION_REVIEWER" &&
+      taskStage.responsibleRole === "COMPENSATION_REVIEWER"
+    ) {
       return true;
     }
 
     // R&R Officer Queue
-    if (user.role === "RR_OFFICER" && taskStage.responsibleRole === "RR_OFFICER") {
+    if (
+      user.role === "RR_OFFICER" &&
+      taskStage.responsibleRole === "RR_OFFICER"
+    ) {
       return true;
     }
 
     // R&R Reviewer Queue
-    if (user.role === "RR_REVIEWER" && taskStage.responsibleRole === "RR_REVIEWER") {
+    if (
+      user.role === "RR_REVIEWER" &&
+      taskStage.responsibleRole === "RR_REVIEWER"
+    ) {
       return true;
     }
 
@@ -787,7 +1026,9 @@ api.get("/tasks/my", requireAuth, (req: Request, res: Response) => {
   const hydrated = filtered.map((t) => {
     const c = state.cases.find((item) => item.id === t.caseId);
     const p = c ? state.parcels.find((item) => item.id === c.parcelId) : null;
-    const proj = c ? state.projects.find((item) => item.id === c.projectId) : null;
+    const proj = c
+      ? state.projects.find((item) => item.id === c.projectId)
+      : null;
     const stage = state.workflowStages.find((s) => s.id === t.stageId);
     return {
       ...t,
@@ -810,7 +1051,9 @@ export function executeStageAdvancement(
   user: any,
   customRemarks?: string,
 ) {
-  const remarks = customRemarks || `Stage ${currentStage.name} completed and verified by ${user.displayName || user.email} (${user.role || "OFFICER"}).`;
+  const remarks =
+    customRemarks ||
+    `Stage ${currentStage.name} completed and verified by ${user.displayName || user.email} (${user.role || "OFFICER"}).`;
 
   if (currentTask) {
     currentTask.status = "COMPLETED";
@@ -818,8 +1061,13 @@ export function executeStageAdvancement(
     currentTask.remarks = remarks;
   }
 
-  const relatedParcel = state.parcels.find((p) => p.id === targetCase.parcelId || p.parcelId === targetCase.parcelId);
-  const relatedProject = state.projects.find((p) => p.id === targetCase.projectId || p.projectId === targetCase.projectId);
+  const relatedParcel = state.parcels.find(
+    (p) => p.id === targetCase.parcelId || p.parcelId === targetCase.parcelId,
+  );
+  const relatedProject = state.projects.find(
+    (p) =>
+      p.id === targetCase.projectId || p.projectId === targetCase.projectId,
+  );
 
   // Auto-Attach Required Synthetic Document upon stage approval
   const docType = currentStage.mandatoryDocumentType || "OTHER";
@@ -859,35 +1107,60 @@ export function executeStageAdvancement(
   const posItem = state.possession.find((pr) => pr.caseId === targetCase.id);
 
   if (currentStage.id === "stage-admin-rev" || currentStage.sequence === 2) {
-    if (relatedParcel) relatedParcel.acquisitionStatus = "FIELD_VERIFICATION_PENDING";
-  } else if (currentStage.id === "stage-field-ver" || currentStage.sequence === 3) {
+    if (relatedParcel)
+      relatedParcel.acquisitionStatus = "FIELD_VERIFICATION_PENDING";
+  } else if (
+    currentStage.id === "stage-field-ver" ||
+    currentStage.sequence === 3
+  ) {
     if (relatedParcel) relatedParcel.acquisitionStatus = "FIELD_VERIFIED";
-  } else if (currentStage.id === "stage-comp-assess" || currentStage.sequence === 5) {
+  } else if (
+    currentStage.id === "stage-comp-assess" ||
+    currentStage.sequence === 5
+  ) {
     if (compItem && compItem.status === "PENDING") {
       compItem.status = "ASSESSED";
     }
-  } else if (currentStage.id === "stage-comp-appr" || currentStage.sequence === 6) {
+  } else if (
+    currentStage.id === "stage-comp-appr" ||
+    currentStage.sequence === 6
+  ) {
     if (compItem) {
       compItem.status = "APPROVED";
-      compItem.approvedAmount = compItem.approvedAmount || compItem.assessedAmount;
+      compItem.approvedAmount =
+        compItem.approvedAmount || compItem.assessedAmount;
     }
-  } else if (currentStage.id === "stage-payment" || currentStage.sequence === 7) {
+  } else if (
+    currentStage.id === "stage-payment" ||
+    currentStage.sequence === 7
+  ) {
     if (compItem) {
       compItem.status = "PAID";
       compItem.paidAmount = compItem.approvedAmount || compItem.assessedAmount;
-      compItem.paymentReference = compItem.paymentReference || `DEMO-PFMS-2026-${randomUUID().slice(0, 8).toUpperCase()}`;
+      compItem.paymentReference =
+        compItem.paymentReference ||
+        `DEMO-PFMS-2026-${randomUUID().slice(0, 8).toUpperCase()}`;
       compItem.lastSyncedAt = new Date().toISOString();
     }
-  } else if (currentStage.id === "stage-rr-assess" || currentStage.sequence === 8) {
+  } else if (
+    currentStage.id === "stage-rr-assess" ||
+    currentStage.sequence === 8
+  ) {
     if (rrItem && rrItem.status === "IDENTIFIED") {
       rrItem.status = "ASSESSED";
     }
-  } else if (currentStage.id === "stage-rr-appr" || currentStage.sequence === 9) {
+  } else if (
+    currentStage.id === "stage-rr-appr" ||
+    currentStage.sequence === 9
+  ) {
     if (rrItem) {
       rrItem.status = "COMPLETED";
       rrItem.benefitsDelivered = rrItem.eligibleFamilies;
     }
-  } else if (currentStage.id === "stage-possession" || currentStage.sequence === 10) {
+  } else if (
+    currentStage.id === "stage-possession" ||
+    currentStage.sequence === 10
+  ) {
     if (posItem) {
       posItem.status = "POSSESSION_COMPLETED";
       posItem.possessionDate = new Date().toISOString();
@@ -902,13 +1175,18 @@ export function executeStageAdvancement(
 
   // Determine Next Generic Workflow Stage
   const currentSeq = currentStage.sequence;
-  const nextStage = state.workflowStages.find((s) => s.sequence === currentSeq + 1);
+  const nextStage = state.workflowStages.find(
+    (s) => s.sequence === currentSeq + 1,
+  );
 
   let nextTask: Task | undefined;
 
   if (nextStage) {
     targetCase.currentStage = nextStage.name;
-    targetCase.progress = Math.min(100, Math.round((nextStage.sequence / state.workflowStages.length) * 100));
+    targetCase.progress = Math.min(
+      100,
+      Math.round((nextStage.sequence / state.workflowStages.length) * 100),
+    );
 
     // Resolve next responsible officer
     const nextOfficer = findResponsibleOfficer(state, {
@@ -957,10 +1235,18 @@ export function executeStageAdvancement(
 
   // Update Project progress
   if (relatedProject) {
-    const projectCases = state.cases.filter((cas) => cas.projectId === relatedProject.id);
-    const avgProgress = Math.round(projectCases.reduce((sum, cas) => sum + cas.progress, 0) / (projectCases.length || 1));
+    const projectCases = state.cases.filter(
+      (cas) => cas.projectId === relatedProject.id,
+    );
+    const avgProgress = Math.round(
+      projectCases.reduce((sum, cas) => sum + cas.progress, 0) /
+        (projectCases.length || 1),
+    );
     relatedProject.progress = avgProgress;
-    if (projectCases.length > 0 && projectCases.every((cas) => cas.status === "Completed")) {
+    if (
+      projectCases.length > 0 &&
+      projectCases.every((cas) => cas.status === "Completed")
+    ) {
       relatedProject.status = "Completed";
     } else if (relatedProject.status === "Draft") {
       relatedProject.status = "In Progress";
@@ -978,10 +1264,18 @@ export function executeStageAdvancement(
     { stage: currentStage.name, documentId: docId },
   );
 
-  audit(state, user.email, user.role, "TASK_APPROVED", "TASK", currentTask?.id || targetCase.id, {
-    stage: currentStage.name,
-    caseId: targetCase.id,
-  });
+  audit(
+    state,
+    user.email,
+    user.role,
+    "TASK_APPROVED",
+    "TASK",
+    currentTask?.id || targetCase.id,
+    {
+      stage: currentStage.name,
+      caseId: targetCase.id,
+    },
+  );
 
   return {
     case: targetCase,
@@ -1000,12 +1294,18 @@ function handleTaskApproveOrComplete(req: Request, res: Response) {
   const task = state.tasks.find((t) => t.id === req.params.id);
 
   if (!task) {
-    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Task not found" } });
+    return res
+      .status(404)
+      .json({ error: { code: "NOT_FOUND", message: "Task not found" } });
   }
 
   const stage = state.workflowStages.find((s) => s.id === task.stageId);
   if (!stage) {
-    return res.status(400).json({ error: { code: "INVALID_STAGE", message: "Workflow stage undefined" } });
+    return res
+      .status(400)
+      .json({
+        error: { code: "INVALID_STAGE", message: "Workflow stage undefined" },
+      });
   }
 
   // Server-Side Role Verification
@@ -1013,10 +1313,16 @@ function handleTaskApproveOrComplete(req: Request, res: Response) {
     user.role === stage.responsibleRole ||
     user.role === "SUPER_ADMIN" ||
     user.role === "NATIONAL_ADMIN" ||
-    (stage.responsibleRole === "PROJECT_OFFICER" && user.role === "PROJECT_AUTHORITY") ||
-    (stage.responsibleRole === "COMPENSATION_REVIEWER" && user.role === "FINANCE_OFFICER");
+    (stage.responsibleRole === "PROJECT_OFFICER" &&
+      user.role === "PROJECT_AUTHORITY") ||
+    (stage.responsibleRole === "COMPENSATION_REVIEWER" &&
+      user.role === "FINANCE_OFFICER");
 
-  if (!isAuthorizedRole && task.assignedUserId !== user.email && task.assignedUserId !== user.id) {
+  if (
+    !isAuthorizedRole &&
+    task.assignedUserId !== user.email &&
+    task.assignedUserId !== user.id
+  ) {
     return res.status(403).json({
       error: {
         code: "FORBIDDEN",
@@ -1027,10 +1333,21 @@ function handleTaskApproveOrComplete(req: Request, res: Response) {
 
   const relatedCase = state.cases.find((c) => c.id === task.caseId);
   if (!relatedCase) {
-    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Associated case not found" } });
+    return res
+      .status(404)
+      .json({
+        error: { code: "NOT_FOUND", message: "Associated case not found" },
+      });
   }
 
-  const result = executeStageAdvancement(state, relatedCase, task, stage, user, req.body?.remarks);
+  const result = executeStageAdvancement(
+    state,
+    relatedCase,
+    task,
+    stage,
+    user,
+    req.body?.remarks,
+  );
   saveState();
 
   res.json({
@@ -1050,20 +1367,34 @@ api.post("/tasks/:id/complete", requireAuth, handleTaskApproveOrComplete);
 function handleCaseAdvance(req: Request, res: Response) {
   const state = loadState();
   const user = (req as any).user;
-  const targetCase = state.cases.find((c) => c.id === req.params.id || c.caseId === req.params.id);
+  const targetCase = state.cases.find(
+    (c) => c.id === req.params.id || c.caseId === req.params.id,
+  );
 
   if (!targetCase) {
-    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Case not found" } });
+    return res
+      .status(404)
+      .json({ error: { code: "NOT_FOUND", message: "Case not found" } });
   }
 
   // Find active task or match stage by case's currentStage
-  const activeTask = state.tasks.find((t) => t.caseId === targetCase.id && ["PENDING", "IN_PROGRESS", "OVERDUE"].includes(t.status));
+  const activeTask = state.tasks.find(
+    (t) =>
+      t.caseId === targetCase.id &&
+      ["PENDING", "IN_PROGRESS", "OVERDUE"].includes(t.status),
+  );
   const currentStage = activeTask
     ? state.workflowStages.find((s) => s.id === activeTask.stageId)
-    : state.workflowStages.find((s) => s.name.toLowerCase() === targetCase.currentStage?.toLowerCase()) || state.workflowStages[1];
+    : state.workflowStages.find(
+        (s) => s.name.toLowerCase() === targetCase.currentStage?.toLowerCase(),
+      ) || state.workflowStages[1];
 
   if (!currentStage) {
-    return res.status(400).json({ error: { code: "INVALID_STAGE", message: "Workflow stage undefined" } });
+    return res
+      .status(400)
+      .json({
+        error: { code: "INVALID_STAGE", message: "Workflow stage undefined" },
+      });
   }
 
   // Server-Side Role Verification
@@ -1071,10 +1402,17 @@ function handleCaseAdvance(req: Request, res: Response) {
     user.role === currentStage.responsibleRole ||
     user.role === "SUPER_ADMIN" ||
     user.role === "NATIONAL_ADMIN" ||
-    (currentStage.responsibleRole === "PROJECT_OFFICER" && user.role === "PROJECT_AUTHORITY") ||
-    (currentStage.responsibleRole === "COMPENSATION_REVIEWER" && user.role === "FINANCE_OFFICER");
+    (currentStage.responsibleRole === "PROJECT_OFFICER" &&
+      user.role === "PROJECT_AUTHORITY") ||
+    (currentStage.responsibleRole === "COMPENSATION_REVIEWER" &&
+      user.role === "FINANCE_OFFICER");
 
-  if (!isAuthorizedRole && activeTask && activeTask.assignedUserId !== user.email && activeTask.assignedUserId !== user.id) {
+  if (
+    !isAuthorizedRole &&
+    activeTask &&
+    activeTask.assignedUserId !== user.email &&
+    activeTask.assignedUserId !== user.id
+  ) {
     return res.status(403).json({
       error: {
         code: "FORBIDDEN",
@@ -1083,7 +1421,14 @@ function handleCaseAdvance(req: Request, res: Response) {
     });
   }
 
-  const result = executeStageAdvancement(state, targetCase, activeTask, currentStage, user, req.body?.remarks);
+  const result = executeStageAdvancement(
+    state,
+    targetCase,
+    activeTask,
+    currentStage,
+    user,
+    req.body?.remarks,
+  );
   saveState();
 
   res.json({
@@ -1109,13 +1454,19 @@ api.post(
     const task = state.tasks.find((t) => t.id === req.params.id);
 
     if (!task) {
-      return res.status(404).json({ error: { code: "NOT_FOUND", message: "Task not found" } });
+      return res
+        .status(404)
+        .json({ error: { code: "NOT_FOUND", message: "Task not found" } });
     }
 
     const input = req.body || {};
     const relatedCase = state.cases.find((c) => c.id === task.caseId);
-    const relatedParcel = relatedCase ? state.parcels.find((p) => p.id === relatedCase.parcelId) : null;
-    const relatedProject = relatedCase ? state.projects.find((p) => p.id === relatedCase.projectId) : null;
+    const relatedParcel = relatedCase
+      ? state.parcels.find((p) => p.id === relatedCase.parcelId)
+      : null;
+    const relatedProject = relatedCase
+      ? state.projects.find((p) => p.id === relatedCase.projectId)
+      : null;
 
     const evidence: FieldEvidence = {
       id: `ev-${Date.now()}`,
@@ -1131,7 +1482,9 @@ api.post(
       longitude: Number(input.longitude || 76.786),
       isDemoGps: Boolean(input.isDemoGps ?? true),
       captureTimestamp: new Date().toISOString(),
-      remarks: input.remarks || "Physical boundary verified on site. Land under agricultural use.",
+      remarks:
+        input.remarks ||
+        "Physical boundary verified on site. Land under agricultural use.",
       checklist: {
         physicallyIdentified: Boolean(input.physicallyIdentified ?? true),
         boundaryVerified: Boolean(input.boundaryVerified ?? true),
@@ -1177,13 +1530,16 @@ api.post(
       uploadedBy: user.id,
       uploadedByName: user.displayName,
       uploadedAt: new Date().toISOString(),
-      remarks: "DEMO / SYNTHETIC DOCUMENT — NOT A LEGAL GOVERNMENT NOTIFICATION",
+      remarks:
+        "DEMO / SYNTHETIC DOCUMENT — NOT A LEGAL GOVERNMENT NOTIFICATION",
     };
     state.documents.unshift(docRecord);
     task.attachedDocumentId = docId;
 
     // Advance to Evidence Review & Scrutiny
-    const reviewStage = state.workflowStages.find((s) => s.id === "stage-evidence-rev") || state.workflowStages[3];
+    const reviewStage =
+      state.workflowStages.find((s) => s.id === "stage-evidence-rev") ||
+      state.workflowStages[3];
     const reviewer = findResponsibleOfficer(state, {
       requiredRole: "REVIEWER",
       districtName: relatedParcel?.district || relatedProject?.district,
@@ -1200,7 +1556,9 @@ api.post(
         stageId: reviewStage.id,
         status: "IN_PROGRESS",
         assignedUserId: reviewer.email,
-        dueAt: new Date(Date.now() + reviewStage.slaDays * 86400000).toISOString(),
+        dueAt: new Date(
+          Date.now() + reviewStage.slaDays * 86400000,
+        ).toISOString(),
         remarks: `Review field evidence and cadastral boundary report for ${relatedCase.caseId}.`,
         evidence,
       };
@@ -1232,16 +1590,25 @@ api.post(
       );
     }
 
-    audit(state, user.email, user.role, "FIELD_VERIFIED", "CASE", relatedCase?.id, {
-      parcelId: relatedParcel?.parcelId,
-      latitude: evidence.latitude,
-      longitude: evidence.longitude,
-    });
+    audit(
+      state,
+      user.email,
+      user.role,
+      "FIELD_VERIFIED",
+      "CASE",
+      relatedCase?.id,
+      {
+        parcelId: relatedParcel?.parcelId,
+        latitude: evidence.latitude,
+        longitude: evidence.longitude,
+      },
+    );
 
     saveState();
     res.json({
       data: {
-        message: "Field verification submitted successfully. Transferred to Reviewer.",
+        message:
+          "Field verification submitted successfully. Transferred to Reviewer.",
         evidence,
       },
     });
@@ -1254,7 +1621,10 @@ api.post("/tasks/:id/reject", requireAuth, (req: Request, res: Response) => {
   const user = (req as any).user;
   const task = state.tasks.find((t) => t.id === req.params.id);
 
-  if (!task) return res.status(404).json({ error: { code: "NOT_FOUND", message: "Task not found" } });
+  if (!task)
+    return res
+      .status(404)
+      .json({ error: { code: "NOT_FOUND", message: "Task not found" } });
 
   task.status = "REJECTED";
   task.remarks = req.body?.reason || "Rejected by reviewing authority.";
@@ -1262,58 +1632,80 @@ api.post("/tasks/:id/reject", requireAuth, (req: Request, res: Response) => {
   const relatedCase = state.cases.find((c) => c.id === task.caseId);
   if (relatedCase) {
     relatedCase.status = "On Hold";
-    addCaseActivity(state, relatedCase.id, user.email, user.role, user.displayName, "TASK_REJECTED", task.remarks || "Rejected by reviewing authority.");
+    addCaseActivity(
+      state,
+      relatedCase.id,
+      user.email,
+      user.role,
+      user.displayName,
+      "TASK_REJECTED",
+      task.remarks || "Rejected by reviewing authority.",
+    );
   }
 
   saveState();
   res.json({ data: { message: "Task rejected. Case put on hold.", task } });
 });
 
-api.post("/tasks/:id/correction", requireAuth, (req: Request, res: Response) => {
-  const state = loadState();
-  const user = (req as any).user;
-  const task = state.tasks.find((t) => t.id === req.params.id);
+api.post(
+  "/tasks/:id/correction",
+  requireAuth,
+  (req: Request, res: Response) => {
+    const state = loadState();
+    const user = (req as any).user;
+    const task = state.tasks.find((t) => t.id === req.params.id);
 
-  if (!task) return res.status(404).json({ error: { code: "NOT_FOUND", message: "Task not found" } });
+    if (!task)
+      return res
+        .status(404)
+        .json({ error: { code: "NOT_FOUND", message: "Task not found" } });
 
-  task.status = "CORRECTION_REQUESTED";
-  task.remarks = req.body?.reason || "Correction requested.";
+    task.status = "CORRECTION_REQUESTED";
+    task.remarks = req.body?.reason || "Correction requested.";
 
-  const relatedCase = state.cases.find((c) => c.id === task.caseId);
-  const relatedParcel = relatedCase ? state.parcels.find((p) => p.id === relatedCase.parcelId) : null;
+    const relatedCase = state.cases.find((c) => c.id === task.caseId);
+    const relatedParcel = relatedCase
+      ? state.parcels.find((p) => p.id === relatedCase.parcelId)
+      : null;
 
-  // Dispatch correction task back to field officer
-  const fieldOfficer = findResponsibleOfficer(state, {
-    requiredRole: "FIELD_OFFICER",
-    tehsilName: relatedParcel?.tehsil,
-    villageName: relatedParcel?.village,
-  });
+    // Dispatch correction task back to field officer
+    const fieldOfficer = findResponsibleOfficer(state, {
+      requiredRole: "FIELD_OFFICER",
+      tehsilName: relatedParcel?.tehsil,
+      villageName: relatedParcel?.village,
+    });
 
-  const correctionTask: Task = {
-    id: `task-corr-${Date.now()}`,
-    caseId: task.caseId,
-    stageId: "stage-field-ver",
-    status: "IN_PROGRESS",
-    assignedUserId: fieldOfficer.email,
-    dueAt: new Date(Date.now() + 7 * 86400000).toISOString(),
-    remarks: `CORRECTION REQUIRED: ${task.remarks}`,
-  };
-  state.tasks.unshift(correctionTask);
+    const correctionTask: Task = {
+      id: `task-corr-${Date.now()}`,
+      caseId: task.caseId,
+      stageId: "stage-field-ver",
+      status: "IN_PROGRESS",
+      assignedUserId: fieldOfficer.email,
+      dueAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+      remarks: `CORRECTION REQUIRED: ${task.remarks}`,
+    };
+    state.tasks.unshift(correctionTask);
 
-  notify(
-    state,
-    fieldOfficer.email,
-    "TASK_ASSIGNED",
-    "Correction Requested",
-    `Reviewer requested correction on ${relatedCase?.caseId || "Case"}: ${task.remarks}`,
-    "WARNING",
-    "TASK",
-    correctionTask.id,
-  );
+    notify(
+      state,
+      fieldOfficer.email,
+      "TASK_ASSIGNED",
+      "Correction Requested",
+      `Reviewer requested correction on ${relatedCase?.caseId || "Case"}: ${task.remarks}`,
+      "WARNING",
+      "TASK",
+      correctionTask.id,
+    );
 
-  saveState();
-  res.json({ data: { message: "Correction task dispatched to Field Officer.", task: correctionTask } });
-});
+    saveState();
+    res.json({
+      data: {
+        message: "Correction task dispatched to Field Officer.",
+        task: correctionTask,
+      },
+    });
+  },
+);
 
 // ----------------------------------------------------------------------------
 // 8. Financials: Compensation & PFMS Direct Benefit Transfer (DBT)
@@ -1326,14 +1718,29 @@ api.get("/compensation", (_req: Request, res: Response) => {
 
 api.patch(
   "/compensation/:id",
-  requireRole("COMPENSATION_OFFICER", "COMPENSATION_REVIEWER", "FINANCE_OFFICER", "DISTRICT_OFFICER", "SUPER_ADMIN"),
+  requireRole(
+    "COMPENSATION_OFFICER",
+    "COMPENSATION_REVIEWER",
+    "FINANCE_OFFICER",
+    "DISTRICT_OFFICER",
+    "SUPER_ADMIN",
+  ),
   (req: Request, res: Response) => {
     const state = loadState();
     const user = (req as any).user;
-    const item = state.compensation.find((cr) => cr.id === req.params.id || cr.caseId === req.params.id);
+    const item = state.compensation.find(
+      (cr) => cr.id === req.params.id || cr.caseId === req.params.id,
+    );
 
     if (!item) {
-      return res.status(404).json({ error: { code: "NOT_FOUND", message: "Compensation record not found" } });
+      return res
+        .status(404)
+        .json({
+          error: {
+            code: "NOT_FOUND",
+            message: "Compensation record not found",
+          },
+        });
     }
 
     const { assessedAmount, approvedAmount, status } = req.body;
@@ -1370,7 +1777,8 @@ api.patch(
         uploadedBy: user.id,
         uploadedByName: user.displayName,
         uploadedAt: new Date().toISOString(),
-        remarks: "DEMO / SYNTHETIC DOCUMENT — NOT A LEGAL GOVERNMENT NOTIFICATION",
+        remarks:
+          "DEMO / SYNTHETIC DOCUMENT — NOT A LEGAL GOVERNMENT NOTIFICATION",
       };
       state.documents.unshift(docRecord);
 
@@ -1387,8 +1795,12 @@ api.patch(
         relatedCase.status = "In Progress";
 
         // Advance to R&R Assessment
-        const rrStage = state.workflowStages.find((s) => s.id === "stage-rr-assess") || state.workflowStages[7];
-        const rrOfficer = findResponsibleOfficer(state, { requiredRole: "RR_OFFICER" });
+        const rrStage =
+          state.workflowStages.find((s) => s.id === "stage-rr-assess") ||
+          state.workflowStages[7];
+        const rrOfficer = findResponsibleOfficer(state, {
+          requiredRole: "RR_OFFICER",
+        });
         relatedCase.currentStage = rrStage.name;
 
         const rrTask: Task = {
@@ -1397,7 +1809,9 @@ api.patch(
           stageId: rrStage.id,
           status: "IN_PROGRESS",
           assignedUserId: rrOfficer.email,
-          dueAt: new Date(Date.now() + rrStage.slaDays * 86400000).toISOString(),
+          dueAt: new Date(
+            Date.now() + rrStage.slaDays * 86400000,
+          ).toISOString(),
           remarks: `R&R entitlement package delivery for ${relatedCase.caseId}.`,
         };
         state.tasks.unshift(rrTask);
@@ -1413,10 +1827,18 @@ api.patch(
         );
       }
 
-      audit(state, user.email, user.role, "COMPENSATION_PAID", "COMPENSATION", item.id, {
-        amount: item.approvedAmount,
-        paymentReference: paymentRef,
-      });
+      audit(
+        state,
+        user.email,
+        user.role,
+        "COMPENSATION_PAID",
+        "COMPENSATION",
+        item.id,
+        {
+          amount: item.approvedAmount,
+          paymentReference: paymentRef,
+        },
+      );
     }
 
     saveState();
@@ -1424,29 +1846,48 @@ api.patch(
   },
 );
 
-api.post("/compensation/:id/sync", requireAuth, (req: Request, res: Response) => {
-  const state = loadState();
-  const user = (req as any).user;
-  const item = state.compensation.find((cr) => cr.id === req.params.id);
+api.post(
+  "/compensation/:id/sync",
+  requireAuth,
+  (req: Request, res: Response) => {
+    const state = loadState();
+    const user = (req as any).user;
+    const item = state.compensation.find((cr) => cr.id === req.params.id);
 
-  if (!item) {
-    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Compensation record not found" } });
-  }
+    if (!item) {
+      return res
+        .status(404)
+        .json({
+          error: {
+            code: "NOT_FOUND",
+            message: "Compensation record not found",
+          },
+        });
+    }
 
-  const paymentRef = `DEMO-PFMS-2026-${randomUUID().slice(0, 8).toUpperCase()}`;
-  item.status = "PAID";
-  item.paidAmount = item.approvedAmount || item.assessedAmount;
-  item.paymentReference = paymentRef;
-  item.lastSyncedAt = new Date().toISOString();
+    const paymentRef = `DEMO-PFMS-2026-${randomUUID().slice(0, 8).toUpperCase()}`;
+    item.status = "PAID";
+    item.paidAmount = item.approvedAmount || item.assessedAmount;
+    item.paymentReference = paymentRef;
+    item.lastSyncedAt = new Date().toISOString();
 
-  audit(state, user?.email || "SYSTEM", "FINANCE_OFFICER", "PFMS_DBT_SYNC", "COMPENSATION", item.id, {
-    paymentReference: paymentRef,
-    paidAmount: item.paidAmount,
-  });
+    audit(
+      state,
+      user?.email || "SYSTEM",
+      "FINANCE_OFFICER",
+      "PFMS_DBT_SYNC",
+      "COMPENSATION",
+      item.id,
+      {
+        paymentReference: paymentRef,
+        paidAmount: item.paidAmount,
+      },
+    );
 
-  saveState();
-  res.json({ data: item });
-});
+    saveState();
+    res.json({ data: item });
+  },
+);
 
 // ----------------------------------------------------------------------------
 // 9. R&R Entitlements API
@@ -1463,20 +1904,39 @@ api.patch(
   (req: Request, res: Response) => {
     const state = loadState();
     const user = (req as any).user;
-    const item = state.rr.find((r) => r.id === req.params.id || r.caseId === req.params.id);
+    const item = state.rr.find(
+      (r) => r.id === req.params.id || r.caseId === req.params.id,
+    );
 
     if (!item) {
-      return res.status(404).json({ error: { code: "NOT_FOUND", message: "R&R record not found" } });
+      return res
+        .status(404)
+        .json({
+          error: { code: "NOT_FOUND", message: "R&R record not found" },
+        });
     }
 
-    const { affectedFamilies, displacedFamilies, eligibleFamilies, benefitsDelivered, status } = req.body;
+    const {
+      affectedFamilies,
+      displacedFamilies,
+      eligibleFamilies,
+      benefitsDelivered,
+      status,
+    } = req.body;
 
-    if (affectedFamilies !== undefined) item.affectedFamilies = Number(affectedFamilies);
-    if (displacedFamilies !== undefined) item.displacedFamilies = Number(displacedFamilies);
-    if (eligibleFamilies !== undefined) item.eligibleFamilies = Number(eligibleFamilies);
-    if (benefitsDelivered !== undefined) item.benefitsDelivered = Number(benefitsDelivered);
+    if (affectedFamilies !== undefined)
+      item.affectedFamilies = Number(affectedFamilies);
+    if (displacedFamilies !== undefined)
+      item.displacedFamilies = Number(displacedFamilies);
+    if (eligibleFamilies !== undefined)
+      item.eligibleFamilies = Number(eligibleFamilies);
+    if (benefitsDelivered !== undefined)
+      item.benefitsDelivered = Number(benefitsDelivered);
 
-    if (status === "COMPLETED" || (benefitsDelivered && benefitsDelivered >= item.eligibleFamilies)) {
+    if (
+      status === "COMPLETED" ||
+      (benefitsDelivered && benefitsDelivered >= item.eligibleFamilies)
+    ) {
       item.status = "COMPLETED";
       item.benefitsDelivered = item.eligibleFamilies;
 
@@ -1503,15 +1963,20 @@ api.patch(
         uploadedBy: user.id,
         uploadedByName: user.displayName,
         uploadedAt: new Date().toISOString(),
-        remarks: "DEMO / SYNTHETIC DOCUMENT — NOT A LEGAL GOVERNMENT NOTIFICATION",
+        remarks:
+          "DEMO / SYNTHETIC DOCUMENT — NOT A LEGAL GOVERNMENT NOTIFICATION",
       };
       state.documents.unshift(docRecord);
 
       // Advance to Possession Stage
       const relatedCase = state.cases.find((c) => c.id === item.caseId);
       if (relatedCase) {
-        const possStage = state.workflowStages.find((s) => s.id === "stage-possession") || state.workflowStages[9];
-        const possOfficer = findResponsibleOfficer(state, { requiredRole: "DISTRICT_OFFICER" });
+        const possStage =
+          state.workflowStages.find((s) => s.id === "stage-possession") ||
+          state.workflowStages[9];
+        const possOfficer = findResponsibleOfficer(state, {
+          requiredRole: "DISTRICT_OFFICER",
+        });
         relatedCase.currentStage = possStage.name;
         relatedCase.progress = 90;
 
@@ -1521,7 +1986,9 @@ api.patch(
           stageId: possStage.id,
           status: "IN_PROGRESS",
           assignedUserId: possOfficer.email,
-          dueAt: new Date(Date.now() + possStage.slaDays * 86400000).toISOString(),
+          dueAt: new Date(
+            Date.now() + possStage.slaDays * 86400000,
+          ).toISOString(),
           remarks: `Form 3E Site Possession and Handover for ${relatedCase.caseId}.`,
         };
         state.tasks.unshift(possTask);
@@ -1562,19 +2029,29 @@ api.patch(
   (req: Request, res: Response) => {
     const state = loadState();
     const user = (req as any).user;
-    const item = state.possession.find((p) => p.id === req.params.id || p.caseId === req.params.id);
+    const item = state.possession.find(
+      (p) => p.id === req.params.id || p.caseId === req.params.id,
+    );
 
     if (!item) {
-      return res.status(404).json({ error: { code: "NOT_FOUND", message: "Possession record not found" } });
+      return res
+        .status(404)
+        .json({
+          error: { code: "NOT_FOUND", message: "Possession record not found" },
+        });
     }
 
     item.status = "POSSESSION_COMPLETED";
     item.possessionDate = new Date().toISOString();
     item.officerId = user.email;
-    item.remarks = req.body?.remarks || "Site possession completed under statutory Form 3E protocol.";
+    item.remarks =
+      req.body?.remarks ||
+      "Site possession completed under statutory Form 3E protocol.";
 
     const relatedCase = state.cases.find((c) => c.id === item.caseId);
-    const relatedParcel = relatedCase ? state.parcels.find((p) => p.id === relatedCase.parcelId) : null;
+    const relatedParcel = relatedCase
+      ? state.parcels.find((p) => p.id === relatedCase.parcelId)
+      : null;
 
     if (relatedParcel) {
       relatedParcel.acquisitionStatus = "POSSESSION_COMPLETED";
@@ -1603,7 +2080,8 @@ api.patch(
       uploadedBy: user.id,
       uploadedByName: user.displayName,
       uploadedAt: new Date().toISOString(),
-      remarks: "DEMO / SYNTHETIC DOCUMENT — NOT A LEGAL GOVERNMENT NOTIFICATION",
+      remarks:
+        "DEMO / SYNTHETIC DOCUMENT — NOT A LEGAL GOVERNMENT NOTIFICATION",
     };
     state.documents.unshift(docRecord);
 
@@ -1623,9 +2101,17 @@ api.patch(
       );
     }
 
-    audit(state, user.email, user.role, "POSSESSION_COMPLETED", "POSSESSION", item.id, {
-      parcelId: item.parcelId,
-    });
+    audit(
+      state,
+      user.email,
+      user.role,
+      "POSSESSION_COMPLETED",
+      "POSSESSION",
+      item.id,
+      {
+        parcelId: item.parcelId,
+      },
+    );
 
     saveState();
     res.json({ data: item });
@@ -1644,16 +2130,37 @@ api.get("/documents", (_req: Request, res: Response) => {
 api.get("/documents/types", (_req: Request, res: Response) => {
   res.json({
     data: [
-      { type: "PROJECT_APPROVAL", label: "Administrative Sanction / Project Approval" },
-      { type: "PRELIMINARY_NOTIFICATION", label: "Preliminary Land Acquisition Notification" },
+      {
+        type: "PROJECT_APPROVAL",
+        label: "Administrative Sanction / Project Approval",
+      },
+      {
+        type: "PRELIMINARY_NOTIFICATION",
+        label: "Preliminary Land Acquisition Notification",
+      },
       { type: "GAZETTE_NOTIFICATION", label: "Statutory Gazette Notification" },
-      { type: "FIELD_VERIFICATION_REPORT", label: "Field Ground Inspection & Evidence Report" },
-      { type: "SURVEY_REPORT", label: "Revenue Scrutiny Note & Cadastral Report" },
-      { type: "COMPENSATION_AWARD", label: "Statutory Compensation Award Declaration" },
+      {
+        type: "FIELD_VERIFICATION_REPORT",
+        label: "Field Ground Inspection & Evidence Report",
+      },
+      {
+        type: "SURVEY_REPORT",
+        label: "Revenue Scrutiny Note & Cadastral Report",
+      },
+      {
+        type: "COMPENSATION_AWARD",
+        label: "Statutory Compensation Award Declaration",
+      },
       { type: "PAYMENT_PROOF", label: "PFMS Direct Benefit Transfer Advice" },
       { type: "RR_APPROVAL", label: "R&R Package Delivery Sanction Order" },
-      { type: "POSSESSION_RECORD", label: "Form 3E Site Possession & Handover Certificate" },
-      { type: "COMPLETION_CERTIFICATE", label: "Project Completion & Cadastral Handover Certificate" },
+      {
+        type: "POSSESSION_RECORD",
+        label: "Form 3E Site Possession & Handover Certificate",
+      },
+      {
+        type: "COMPLETION_CERTIFICATE",
+        label: "Project Completion & Cadastral Handover Certificate",
+      },
     ],
   });
 });
@@ -1708,13 +2215,19 @@ api.post("/documents", requireAuth, handleDocumentUpload);
 
 api.get("/gis/projects/:id/parcels", (req: Request, res: Response) => {
   const state = loadState();
-  const project = state.projects.find((p) => p.id === req.params.id || p.projectId === req.params.id);
+  const project = state.projects.find(
+    (p) => p.id === req.params.id || p.projectId === req.params.id,
+  );
 
   if (!project) {
-    return res.status(404).json({ error: { code: "NOT_FOUND", message: "Project not found" } });
+    return res
+      .status(404)
+      .json({ error: { code: "NOT_FOUND", message: "Project not found" } });
   }
 
-  const projectParcels = state.parcels.filter((p) => p.projectId === project.id);
+  const projectParcels = state.parcels.filter(
+    (p) => p.projectId === project.id,
+  );
 
   const featureCollection = {
     type: "FeatureCollection",
@@ -1760,17 +2273,22 @@ api.get("/integrations", (_req: Request, res: Response) => {
       {
         system: "BhoomiRashi",
         label: "MOCK CONNECTED",
-        description: "National Highway acquisition and statutory stages adapter.",
+        description:
+          "National Highway acquisition and statutory stages adapter.",
         status: "HEALTHY",
-        lastSyncedAt: projects.find((p) => p?.sourceSystem === "BHOOMIRASHI")?.lastSyncedAt || null,
+        lastSyncedAt:
+          projects.find((p) => p?.sourceSystem === "BHOOMIRASHI")
+            ?.lastSyncedAt || null,
         isExternalAuthority: true,
       },
       {
         system: "PFMS",
         label: "MOCK CONNECTED",
-        description: "Public Financial Management System for direct benefit transfers.",
+        description:
+          "Public Financial Management System for direct benefit transfers.",
         status: "HEALTHY",
-        lastSyncedAt: compensation.find((c) => c?.status === "PAID")?.lastSyncedAt || null,
+        lastSyncedAt:
+          compensation.find((c) => c?.status === "PAID")?.lastSyncedAt || null,
         isExternalAuthority: true,
       },
       {
@@ -1817,36 +2335,41 @@ api.get("/integrations/mappings", (_req: Request, res: Response) => {
   res.json({ data: mappings });
 });
 
-api.post(
-  "/integrations/bhoomirashi/sync",
-  (req: Request, res: Response) => {
-    const state = loadState();
-    const user = getAuthUser(req);
-    const actorEmail = user?.email || "national.admin@demo.nlams.gov";
+api.post("/integrations/bhoomirashi/sync", (req: Request, res: Response) => {
+  const state = loadState();
+  const user = getAuthUser(req);
+  const actorEmail = user?.email || "national.admin@demo.nlams.gov";
 
-    const result = syncBhoomiRashi(state, actorEmail);
-    saveState();
+  const result = syncBhoomiRashi(state, actorEmail);
+  saveState();
 
-    res.json({
-      data: {
-        success: true,
-        project: result.project,
-        projectsSynced: 1,
-        parcelReferences: result.parcelsCount,
-        statusUpdates: 6,
-        isNew: result.isNew,
-        message: "BhoomiRashi external project and cadastral parcels synchronized successfully.",
-      },
-    });
-  },
-);
+  res.json({
+    data: {
+      success: true,
+      project: result.project,
+      projectsSynced: 1,
+      parcelReferences: result.parcelsCount,
+      statusUpdates: 6,
+      isNew: result.isNew,
+      message:
+        "BhoomiRashi external project and cadastral parcels synchronized successfully.",
+    },
+  });
+});
 
 api.post("/integrations/:system/sync", (req: Request, res: Response) => {
   const state = loadState();
   const user = getAuthUser(req);
   const sys = String(req.params.system);
 
-  audit(state, user?.email || "SYSTEM", user?.role || "SYSTEM", "EXTERNAL_SYNC_TEST", "INTEGRATION", sys);
+  audit(
+    state,
+    user?.email || "SYSTEM",
+    user?.role || "SYSTEM",
+    "EXTERNAL_SYNC_TEST",
+    "INTEGRATION",
+    sys,
+  );
   saveState();
 
   res.json({
@@ -1878,27 +2401,35 @@ api.get("/notifications", requireAuth, (req: Request, res: Response) => {
   res.json({ data: scoped });
 });
 
-api.patch("/notifications/:id/read", requireAuth, (req: Request, res: Response) => {
-  const state = loadState();
-  const notif = state.notifications.find((n) => n.id === req.params.id);
-  if (notif) {
-    notif.readAt = new Date().toISOString();
-    saveState();
-  }
-  res.json({ data: notif });
-});
-
-api.patch("/notifications/read-all", requireAuth, (req: Request, res: Response) => {
-  const state = loadState();
-  const user = (req as any).user;
-  for (const n of state.notifications) {
-    if (n.recipientId === user.id || n.recipientId === user.email) {
-      n.readAt = new Date().toISOString();
+api.patch(
+  "/notifications/:id/read",
+  requireAuth,
+  (req: Request, res: Response) => {
+    const state = loadState();
+    const notif = state.notifications.find((n) => n.id === req.params.id);
+    if (notif) {
+      notif.readAt = new Date().toISOString();
+      saveState();
     }
-  }
-  saveState();
-  res.json({ data: { success: true } });
-});
+    res.json({ data: notif });
+  },
+);
+
+api.patch(
+  "/notifications/read-all",
+  requireAuth,
+  (req: Request, res: Response) => {
+    const state = loadState();
+    const user = (req as any).user;
+    for (const n of state.notifications) {
+      if (n.recipientId === user.id || n.recipientId === user.email) {
+        n.readAt = new Date().toISOString();
+      }
+    }
+    saveState();
+    res.json({ data: { success: true } });
+  },
+);
 
 // ----------------------------------------------------------------------------
 // 15. Immutable Audit Logs & Reports
@@ -1913,8 +2444,12 @@ api.get("/reports/summary", (_req: Request, res: Response) => {
   const state = loadState();
   const summary = state.projects.map((p) => {
     const projectCases = state.cases.filter((c) => c.projectId === p.id);
-    const projectParcels = state.parcels.filter((par) => par.projectId === p.id);
-    const compRecords = state.compensation.filter((cr) => projectCases.some((c) => c.id === cr.caseId));
+    const projectParcels = state.parcels.filter(
+      (par) => par.projectId === p.id,
+    );
+    const compRecords = state.compensation.filter((cr) =>
+      projectCases.some((c) => c.id === cr.caseId),
+    );
 
     return {
       projectId: p.projectId,
@@ -1926,8 +2461,14 @@ api.get("/reports/summary", (_req: Request, res: Response) => {
       progress: p.progress,
       sourceType: p.sourceType || "NATIVE",
       sourceSystem: p.sourceSystem || "NLAMS",
-      compensationAssessed: compRecords.reduce((sum, item) => sum + item.assessedAmount, 0),
-      compensationPaid: compRecords.reduce((sum, item) => sum + item.paidAmount, 0),
+      compensationAssessed: compRecords.reduce(
+        (sum, item) => sum + item.assessedAmount,
+        0,
+      ),
+      compensationPaid: compRecords.reduce(
+        (sum, item) => sum + item.paidAmount,
+        0,
+      ),
     };
   });
 
