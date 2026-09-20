@@ -25,7 +25,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { api, currentUser, login, logout } from "../api";
+import { api, currentUser, login, logout, getRoleDashboardPath } from "../api";
 import "../notifications.css";
 
 type Notification = {
@@ -40,6 +40,37 @@ type Notification = {
   readAt?: string;
   createdAt: string;
 };
+
+export function isRouteAllowedForRole(pathname: string, role?: string): boolean {
+  if (!role) return false;
+  if (role === "NATIONAL_ADMIN" || role === "SUPER_ADMIN") return true;
+
+  const base = "/" + (pathname.split("/")[1] || "");
+
+  switch (role) {
+    case "FIELD_OFFICER":
+      return ["/", "/field-tasks", "/cases", "/map", "/documents"].includes(base);
+    case "REVIEWER":
+      return ["/", "/review-queue", "/cases", "/map", "/documents"].includes(base);
+    case "COMPENSATION_OFFICER":
+      return ["/", "/compensation", "/cases", "/documents"].includes(base);
+    case "COMPENSATION_REVIEWER":
+    case "FINANCE_OFFICER":
+      return ["/", "/compensation", "/cases", "/documents", "/audit"].includes(base);
+    case "RR_OFFICER":
+    case "RR_REVIEWER":
+      return ["/", "/rr", "/cases", "/documents"].includes(base);
+    case "PROJECT_OFFICER":
+    case "PROJECT_AUTHORITY":
+      return ["/", "/projects", "/cases", "/map", "/documents"].includes(base);
+    case "DISTRICT_OFFICER":
+      return ["/", "/projects", "/cases", "/review-queue", "/map", "/documents", "/compensation", "/rr"].includes(base);
+    case "VIEWER":
+      return ["/", "/projects", "/cases", "/map", "/reports", "/users", "/documents"].includes(base);
+    default:
+      return true;
+  }
+}
 
 const demoRoleOptions = [
   { label: "National Admin", email: "national.admin@demo.nlams.gov", pass: "Demo@123", role: "NATIONAL_ADMIN", desc: "National monitoring, BhoomiRashi integration & governance" },
@@ -59,11 +90,19 @@ const demoRoleOptions = [
 export function PortalLayout() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const user = currentUser();
 
   useEffect(() => {
-    if (!user) navigate("/login");
-  }, [navigate, user]);
+    if (!user) {
+      navigate("/login");
+      return;
+    }
+    // Route guard: if current route is not allowed for role, direct to their dashboard
+    if (!isRouteAllowedForRole(location.pathname, user.role)) {
+      navigate(getRoleDashboardPath(user.role), { replace: true });
+    }
+  }, [navigate, user, location.pathname]);
 
   return (
     <div className="app-shell">
@@ -252,6 +291,7 @@ function Topbar({
   const [resetting, setResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState("");
   const popoverRef = useRef<HTMLDivElement>(null);
+  const roleSwitcherRef = useRef<HTMLDivElement>(null);
 
   const fetchNotifications = async () => {
     try {
@@ -271,6 +311,19 @@ function Topbar({
       window.removeEventListener("nlams:data-changed", handleDataChange);
       clearInterval(interval);
     };
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
+        setShowNotifPopover(false);
+      }
+      if (roleSwitcherRef.current && !roleSwitcherRef.current.contains(event.target as Node)) {
+        setShowRoleSwitcher(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   const unreadCount = notifications.filter((n) => !n.readAt).length;
@@ -305,9 +358,10 @@ function Topbar({
 
   const handleRoleSwitch = async (email: string, pass: string) => {
     try {
-      await login(email, pass);
+      const loggedUser = await login(email, pass);
       setShowRoleSwitcher(false);
-      window.location.reload();
+      const targetDashboard = getRoleDashboardPath(loggedUser.role);
+      navigate(targetDashboard);
     } catch {
       // ignore
     }
@@ -450,7 +504,7 @@ function Topbar({
         </div>
 
         {/* Role Switcher */}
-        <div style={{ position: "relative" }}>
+        <div style={{ position: "relative" }} ref={roleSwitcherRef}>
           <div
             className="top-profile"
             onClick={() => setShowRoleSwitcher(!showRoleSwitcher)}

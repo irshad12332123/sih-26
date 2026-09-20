@@ -68,6 +68,32 @@ export function currentUser(): SessionUser | null {
   }
 }
 
+export function getRoleDashboardPath(role?: string): string {
+  switch (role) {
+    case "FIELD_OFFICER":
+      return "/field-tasks";
+    case "REVIEWER":
+      return "/review-queue";
+    case "COMPENSATION_OFFICER":
+    case "COMPENSATION_REVIEWER":
+    case "FINANCE_OFFICER":
+      return "/compensation";
+    case "RR_OFFICER":
+    case "RR_REVIEWER":
+      return "/rr";
+    case "PROJECT_OFFICER":
+    case "PROJECT_AUTHORITY":
+      return "/";
+    case "DISTRICT_OFFICER":
+      return "/";
+    case "NATIONAL_ADMIN":
+    case "SUPER_ADMIN":
+    case "VIEWER":
+    default:
+      return "/";
+  }
+}
+
 export function logout() {
   localStorage.removeItem("nlams_token");
   localStorage.removeItem("nlams_user");
