@@ -1,6 +1,38 @@
+# Dependencies
 node_modules/
+.pnp
+.pnp.js
+
+# Build Outputs
 dist/
+build/
+client/dist/
+server/dist/
+
+# Local Data and Logs
 .data/
+server/.data/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment Variables
 .env
 .env.local
+.env.*.local
+client/.env
+server/.env
+!client/.env.example
+!server/.env.example
+!.env.example
+
+# TypeScript cache
 *.tsbuildinfo
+.tmp/
+
+# OS and Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
